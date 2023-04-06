@@ -215,6 +215,12 @@ val apply_subst_trigger : subst -> trigger -> trigger
     application) and formulas *)
 val sub_terms : Set.t -> t -> Set.t
 
+(** [literals_of_formula e acc] returns the acc augmented with the literals
+ * in [e].
+ *
+ * [e] must be a formula. *)
+val literals_of_formula : t -> t list -> t list
+
 (** [max_pure_subterms e] returns the maximal pure terms of the given
     expression *)
 val max_pure_subterms : t -> Set.t

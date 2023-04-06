@@ -2754,6 +2754,31 @@ module Purification = struct
 
 end
 
+let literals_of_formula =
+  let rec literals_of_acc ~lit f acc =
+    match form_view f with
+    | Literal _ ->
+      if lit then f :: acc else acc
+    | Iff(f1, f2) ->
+      let g = elim_iff f1 f2 0 ~with_conj:true in
+      literals_of_acc ~lit g acc
+    | Xor(f1, f2) ->
+      let g = neg @@ elim_iff f1 f2 0 ~with_conj:false in
+      literals_of_acc ~lit g acc
+    | Unit (f1,f2) ->
+      let acc = literals_of_acc ~lit:false f1 acc in
+      literals_of_acc ~lit:false f2 acc
+    | Clause (f1, f2, _) ->
+      let acc = literals_of_acc ~lit:true f1 acc in
+      literals_of_acc ~lit:true f2 acc
+    | Lemma _ ->
+      acc
+    | Skolem { main = f; _ } ->
+      literals_of_acc ~lit:true f acc
+    | Let { in_e; let_e; _ } ->
+      literals_of_acc ~lit:true in_e @@ literals_of_acc ~lit:true let_e acc
+  in literals_of_acc ~lit:true
+
 (*
 let purify_literal a =
   Purification.lets_counter := 0;
