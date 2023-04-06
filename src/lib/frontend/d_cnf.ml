@@ -1220,7 +1220,7 @@ let make_form name_base f loc ~decl_kind =
   if Ty.Svty.is_empty (E.free_type_vars ff) then ff
   else
     let id = E.id ff in
-    E.mk_forall name_base loc SM.empty [] ff id ~toplevel:true ~decl_kind
+    E.mk_forall name_base loc E.no_binders [] ff id ~toplevel:true ~decl_kind
 
 let make dloc_file acc stmt =
   let rec aux acc (stmt: Typer_Pipe.typechecked Typer_Pipe.stmt) =
@@ -1323,7 +1323,7 @@ let make dloc_file acc stmt =
                   else
                     let id = E.id ff in
                     E.mk_forall name_base loc
-                      Symbols.Map.empty [] ff id ~toplevel:true ~decl_kind
+                      E.no_binders [] ff id ~toplevel:true ~decl_kind
                 in
                 C.{ st_decl = C.PredDef (e, name_base); st_loc }
               | None ->
@@ -1346,7 +1346,7 @@ let make dloc_file acc stmt =
                   else
                     let id = E.id ff in
                     E.mk_forall name_base loc
-                      Symbols.Map.empty [] ff id ~toplevel:true ~decl_kind
+                      E.no_binders [] ff id ~toplevel:true ~decl_kind
                 in
                 if Options.get_verbose () then
                   Format.eprintf "defining term of %a@." DE.Term.print body;

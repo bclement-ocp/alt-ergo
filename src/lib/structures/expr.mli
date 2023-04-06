@@ -28,7 +28,9 @@
 
 (** Data structures *)
 
-type binders = (Ty.t * int) Symbols.Map.t (*int tag in globally unique *)
+type binders
+
+val no_binders : binders
 
 type t
 

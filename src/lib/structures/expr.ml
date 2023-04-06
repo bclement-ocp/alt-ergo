@@ -34,6 +34,8 @@ module SSet = Sy.Set
 
 type binders = (Ty.t * int) SMap.t (*int tag in globally unique *)
 
+let no_binders = SMap.empty
+
 type t = term_view
 
 and term_view = {

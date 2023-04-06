@@ -388,7 +388,7 @@ let make_form name f loc ~decl_kind =
   if Ty.Svty.is_empty (E.free_type_vars ff) then ff
   else
     let id = E.id ff in
-    E.mk_forall name loc Symbols.Map.empty [] ff id ~toplevel:true ~decl_kind
+    E.mk_forall name loc E.no_binders [] ff id ~toplevel:true ~decl_kind
 
 let mk_assume acc f name loc =
   let ff = make_form name f loc ~decl_kind:E.Daxiom in
