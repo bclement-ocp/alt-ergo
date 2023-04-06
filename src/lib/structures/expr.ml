@@ -28,13 +28,18 @@
 
 module Sy = Symbols
 module SMap = Sy.Map
+module VMap = Var.Map
 module SSet = Sy.Set
 
 (** Data structures *)
 
-type binders = (Ty.t * int) SMap.t (*int tag in globally unique *)
+type binders = (Ty.t * int) VMap.t (*int tag in globally unique *)
 
-let no_binders = SMap.empty
+let no_binders = VMap.empty
+
+let unvar = function
+  | Sy.Var v -> v
+  | _  -> assert false
 
 type t = term_view
 
@@ -162,7 +167,7 @@ let compare_let let1 let2 =
     else compare let1.in_e let2.in_e
 
 let compare_binders b1 b2 =
-  SMap.compare (fun (ty1,i) (ty2,j) ->
+  VMap.compare (fun (ty1,i) (ty2,j) ->
       let c = i - j in if c <> 0 then c else Ty.compare ty1 ty2)
     b1 b2
 
@@ -313,9 +318,9 @@ module F_Htbl : Hashtbl.S with type key = t =
 
 let print_binders =
   let print_one fmt (sy, (ty, _)) =
-    Format.fprintf fmt "%a:%a" Sy.print sy Ty.print ty
+    Format.fprintf fmt "'%a':%a" Var.print sy Ty.print ty
   in fun fmt b ->
-    match SMap.bindings b with
+    match VMap.bindings b with
     | [] ->
       (* can happen when quantifying only on type variables *)
       Format.fprintf fmt "(no term variables)"
@@ -764,9 +769,9 @@ let mk_binders, reset_binders_cpt =
       (fun t sym ->
          incr cpt;
          match t with
-         | { f = (Sy.Var _) as v; ty; _ } -> SMap.add v (ty, !cpt) sym
+         | { f = (Sy.Var v); ty; _ } -> VMap.add v (ty, !cpt) sym
          | _ -> assert false
-      )st SMap.empty
+      )st VMap.empty
   in
   let reset_binders_cpt () =
     cpt := 0
@@ -1072,7 +1077,8 @@ let mk_forall_ter =
     (* when calling mk_forall_ter, binders should not contains
        ununsed binders. Eventual simplification is done in
        mk_forall_bis, which calls mk_forall_ter *)
-    assert (SMap.for_all (fun sy _ -> SMap.mem sy f.vars) new_q.binders);
+    assert (VMap.for_all
+              (fun sy _ -> SMap.mem (Sy.var sy) f.vars) new_q.binders);
     if is_ground f then f
     else
       try
@@ -1095,7 +1101,13 @@ let mk_forall_ter =
           else free_type_vars new_q.main
         in
         let vars =
-          SMap.filter (fun v _ -> not (SMap.mem v new_q.binders))
+          SMap.filter (fun v _ ->
+              let is_bound =
+                match v with
+                | Sy.Var v -> VMap.mem v new_q.binders
+                | _ -> false
+              in
+              not is_bound)
             (free_vars f SMap.empty)
             (* this assumes that eventual variables in hypotheses are
                binded here *)
@@ -1240,8 +1252,9 @@ let no_capture_issue s_t binders =
   let new_v =
     SMap.fold (fun _ t acc -> merge_vars acc t.vars) s_t SMap.empty
   in
-  let capt_bind = SMap.filter (fun sy _ -> SMap.mem sy new_v) binders in
-  if SMap.is_empty capt_bind then true
+  let capt_bind = VMap.filter
+      (fun sy _ -> SMap.mem (Sy.var sy) new_v) binders in
+  if VMap.is_empty capt_bind then true
   else
     begin
       Printer.print_wrn
@@ -1287,17 +1300,17 @@ let rec apply_subst_aux (s_t, s_ty) t =
           (* invariant: s_t does not contain other free vars than
              those of t, and binders cannot be free vars of t *)
           not (Options.get_enable_assertions ()) ||
-          SMap.for_all (fun sy _ -> not (SMap.mem sy s_t)) binders
+          VMap.for_all (fun sy _ -> not (SMap.mem (Sy.var sy) s_t)) binders
         );
         let main = apply_subst_aux s main in
         let trs = List.map (apply_subst_trigger s) trs in
         let binders =
-          SMap.fold
+          VMap.fold
             (fun sy (ty,i) bders ->
                let ty' = Ty.apply_subst s_ty ty in
                if Ty.equal ty ty' then bders
-               else SMap.add sy (ty', i) bders
-            )binders binders
+               else VMap.add sy (ty', i) bders
+            ) binders binders
         in
         let sko_v = List.map (apply_subst_aux s) sko_v in
         let sko_vty = List.map (Ty.apply_subst s_ty) sko_vty in
@@ -1317,7 +1330,8 @@ let rec apply_subst_aux (s_t, s_ty) t =
       | Sy.Let, B_let {let_v; let_e; in_e ; let_sko; is_bool} ->
         assert (xs == []);
         (* TODO: implement case where variables capture happens *)
-        assert (no_capture_issue s_t (SMap.singleton let_v (let_e.ty, 0)));
+        assert (no_capture_issue
+                  s_t (VMap.singleton (unvar let_v) (let_e.ty, 0)));
         let let_e2 = apply_subst_aux s let_e in
         let let_sko2 = apply_subst_aux s let_sko in
         (* invariant: s_t only contains vars that are in free in t,
@@ -1421,9 +1435,9 @@ and mk_let_aux ({ let_v; let_e; in_e; _ } as x) =
 
 and mk_forall_bis (q : quantified) id =
   let binders =  (* ignore binders that are not used in f *)
-    SMap.filter (fun sy _ -> SMap.mem sy q.main.vars) q.binders
+    VMap.filter (fun sy _ -> SMap.mem (Sy.var sy) q.main.vars) q.binders
   in
-  if SMap.is_empty binders && Ty.Svty.is_empty q.main.vty then q.main
+  if VMap.is_empty binders && Ty.Svty.is_empty q.main.vty then q.main
   else
     let q = {q with binders} in
     match find_particular_subst binders q.user_trs q.main with
@@ -1436,7 +1450,8 @@ and mk_forall_bis (q : quantified) id =
       else
         let trs = List.map (apply_subst_trigger subst) q.user_trs in
         let sko_v   = List.map (apply_subst_aux subst) q.sko_v in
-        let binders = SMap.filter (fun x _ -> not (SMap.mem x sbs)) binders in
+        let binders = VMap.filter
+            (fun x _ -> not (SMap.mem (Sy.var x) sbs)) binders in
         let q = {q with binders; user_trs = trs; sko_v; main = f } in
         mk_forall_bis q id
 
@@ -1472,20 +1487,20 @@ and find_particular_subst =
       None
     else
       begin
-        assert (not (SMap.is_empty binders));
+        assert (not (VMap.is_empty binders));
         let sbt =
-          SMap.fold
+          VMap.fold
             (fun v (ty, _) sbt ->
                try
                  let f = apply_subst_aux (sbt, Ty.esubst) f in
-                 find_subst v (mk_term v [] ty) f;
+                 find_subst (Sy.var v) (mk_term (Sy.var v) [] ty) f;
                  sbt
                with Found (x, t) ->
                  assert (not (SMap.mem x sbt));
                  let one_sbt = SMap.singleton x t, Ty.esubst in
                  let sbt = SMap.map (apply_subst_aux one_sbt) sbt in
                  SMap.add x t sbt
-            )binders SMap.empty
+            ) binders SMap.empty
         in
         if SMap.is_empty sbt then None else Some sbt
       end
@@ -1593,7 +1608,7 @@ let resolution_of_literal a binders free_vty acc =
     let cond =
       Ty.Svty.subset free_vty (free_type_vars t) &&
       let vars = free_vars t SMap.empty in
-      SMap.for_all (fun sy _ -> SMap.mem sy vars) binders
+      VMap.for_all (fun sy _ -> SMap.mem (Sy.var sy) vars) binders
     in
     if cond then TSet.add t acc else acc
   | _ -> acc
@@ -1730,11 +1745,11 @@ let skolemize { main = f; binders; sko_v; sko_vty; _ } =
       )SMap.empty sko_v
   in
   let sbt =
-    SMap.fold
+    VMap.fold
       (fun x (ty,i) m ->
          let t = mk_term (mk_sym i "_sko") sko_v ty in
          let t = apply_subst (grounding_sbt, Ty.esubst) t in
-         SMap.add x t m
+         SMap.add (Sy.var x) t m
       ) binders SMap.empty
   in
   let res = apply_subst_aux (sbt, Ty.esubst) f in
@@ -2341,10 +2356,11 @@ module Triggers = struct
       )terms terms
 
   let check_user_triggers f toplevel binders trs0 ~decl_kind =
-    if SMap.is_empty binders && Ty.Svty.is_empty f.vty then trs0
+    if VMap.is_empty binders && Ty.Svty.is_empty f.vty then trs0
     else
       let vtype = if toplevel then f.vty else Ty.Svty.empty in
-      let vterm = SMap.fold (fun sy _ s -> SSet.add sy s) binders SSet.empty in
+      let vterm = VMap.fold
+          (fun sy _ s -> SSet.add (Sy.var sy) s) binders SSet.empty in
       if decl_kind == Dtheory then
         trs0
         [@ocaml.ppwarning "TODO: filter_good_triggers for this \
@@ -2358,10 +2374,11 @@ module Triggers = struct
         filter_good_triggers (vterm, vtype) trs0
 
   let make f binders decl_kind mconf =
-    if SMap.is_empty binders && Ty.Svty.is_empty f.vty then []
+    if VMap.is_empty binders && Ty.Svty.is_empty f.vty then []
     else
       let vtype = f.vty in
-      let vterm = SMap.fold (fun sy _ s -> SSet.add sy s) binders SSet.empty in
+      let vterm = VMap.fold
+          (fun sy _ s -> SSet.add (Sy.var sy) s) binders SSet.empty in
       match decl_kind, f with
       | Dtheory, _ -> assert false
       | (Dpredicate e | Dfunction e), _ ->
@@ -2443,11 +2460,14 @@ let mk_forall name loc binders trs f id ~toplevel ~decl_kind =
   let binders =
     (* ignore binders that are not used in f ! already done in mk_forall_bis
        but maybe usefull for triggers inference *)
-    SMap.filter (fun sy _ -> SMap.mem sy f.vars) binders
+    VMap.filter (fun sy _ -> SMap.mem (Sy.var sy) f.vars) binders
   in
   let sko_v =
     SMap.fold (fun sy (ty, _) acc ->
-        if SMap.mem sy binders then acc else (mk_term sy [] ty) :: acc)
+        let is_bound = match sy with
+          | Sy.Var v -> VMap.mem v binders
+          | _ -> false in
+        if is_bound then acc else (mk_term sy [] ty) :: acc)
       (free_vars f SMap.empty) []
   in
   let free_vty = free_type_vars_as_types f in
@@ -2469,7 +2489,7 @@ let mk_exists name loc binders trs f id ~toplevel ~decl_kind =
     let tmp =
       neg (mk_forall nm loc binders trs (neg f) id ~toplevel:false ~decl_kind)
     in
-    mk_forall name loc SMap.empty trs tmp id ~toplevel ~decl_kind
+    mk_forall name loc VMap.empty trs tmp id ~toplevel ~decl_kind
 
 
 let rec compile_match mk_destr mker e cases accu =
