@@ -165,6 +165,9 @@ val is_real : t -> bool
 val type_info : t -> Ty.t
 val symbol_info : t -> Symbols.t
 
+val quant_name : quantified -> string
+val quant_loc : quantified -> Loc.t
+
 (** Labeling and models *)
 
 val add_label : Hstring.t -> t -> unit

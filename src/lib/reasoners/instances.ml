@@ -124,7 +124,7 @@ module Make(X : Theory.S) : S with type tbox = X.t = struct
     let new_facts_of_axiom ax insts_ok =
       if get_debug_matching () >= 1 && insts_ok != ME.empty then
         let name = match Expr.form_view ax with
-          | E.Lemma { E.name = s; _ } -> s
+          | E.Lemma lem -> E.quant_name lem
           | E.Unit _ | E.Clause _ | E.Literal _ | E.Skolem _
           | E.Let _ | E.Iff _ | E.Xor _ -> "!(no-name)"
         in
@@ -224,8 +224,8 @@ module Make(X : Theory.S) : S with type tbox = X.t = struct
 
   let record_this_instance f accepted lorig =
     match Expr.form_view lorig with
-    | E.Lemma { E.name; loc; _ } ->
-      Profiling.new_instance_of name f loc accepted
+    | E.Lemma lem ->
+      Profiling.new_instance_of (E.quant_name lem) f (E.quant_loc lem) accepted
     | E.Unit _ | E.Clause _ | E.Literal _ | E.Skolem _
     | E.Let _ | E.Iff _ | E.Xor _ -> assert false
 
@@ -234,8 +234,8 @@ module Make(X : Theory.S) : S with type tbox = X.t = struct
       List.fold_left (fun st t -> E.sub_terms st (E.apply_subst s t))
         SE.empty trs
     in
-    let name, loc, _ = match Expr.form_view lorig with
-      | E.Lemma { E.name; main; loc; _ } -> name, loc, main
+    let name, loc = match Expr.form_view lorig with
+      | E.Lemma lem -> E.quant_name lem, E.quant_loc lem
       | E.Unit _ | E.Clause _ | E.Literal _ | E.Skolem _
       | E.Let _ | E.Iff _ | E.Xor _ -> assert false
     in

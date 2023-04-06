@@ -131,7 +131,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
             | None -> ""
             | Some ff -> begin
                 match E.form_view ff with
-                | E.Lemma xx -> xx.E.name
+                | E.Lemma lem -> E.quant_name lem
                 | E.Unit _ | E.Clause _ | E.Literal _ | E.Skolem _
                 | E.Let _ | E.Iff _ | E.Xor _ -> ""
               end

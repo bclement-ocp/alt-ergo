@@ -746,6 +746,8 @@ let[@inline always] term_view t = t
 
 let [@inline always] type_info t = t.ty
 let [@inline always] symbol_info t = t.f
+let [@inline always] quant_name { name; _ } = name
+let [@inline always] quant_loc { loc; _ } = loc
 
 (* unused
    let is_term e = match e.f with

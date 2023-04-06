@@ -269,7 +269,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
               | None -> ""
               | Some ff -> begin
                   match E.form_view ff with
-                  | E.Lemma xx -> xx.E.name
+                  | E.Lemma lem -> E.quant_name lem
                   | E.Unit _ | E.Clause _ | E.Literal _ | E.Skolem _
                   | E.Let _ | E.Iff _ | E.Xor _ -> ""
                 end
@@ -617,8 +617,8 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       SE.iter
         (fun f ->
            match E.form_view f with
-           | E.Lemma { E.name; loc; _ } ->
-             Profiling.conflicting_instance name loc
+           | E.Lemma lem ->
+             Profiling.conflicting_instance (E.quant_name lem) (E.quant_loc lem)
            | E.Unit _ | E.Clause _ | E.Literal _ | E.Skolem _
            | E.Let _ | E.Iff _ | E.Xor _ -> ()
         )(Ex.formulas_of exp)
