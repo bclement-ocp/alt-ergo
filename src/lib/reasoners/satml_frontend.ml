@@ -990,7 +990,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         if not updated then raise (I_dont_know env);
         unsat_rec env ~first_call:false
 
-      with Ex.Inconsistent (expl, _cls) -> (*may be raised during matching*)
+      with Uf.Inconsistent (expl, _cls) -> (*may be raised during matching*)
       try
         SAT.conflict_analyze_and_fix env.satml (Satml.C_theory expl);
         unsat_rec env ~first_call:false

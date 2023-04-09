@@ -405,13 +405,13 @@ module Main_Default : S = struct
           let base_env, ch =  CC_X.assume_literals base_env ch facts in
           Options.tool_req 3 "TR-CCX-CS-Normal-Run";
           aux ch bad_last (a::dl) base_env l
-        with Ex.Inconsistent (dep, classes) ->
+        with Uf.Inconsistent (dep, classes) ->
         match Ex.remove_fresh exp dep with
         | None ->
           (* The choice doesn't participate to the inconsistency *)
           Debug.split_backjump c dep;
           Options.tool_req 3 "TR-CCX-CS-Case-Split-Conflict";
-          raise (Ex.Inconsistent (dep, classes))
+          raise (Uf.Inconsistent (dep, classes))
         | Some dep ->
           Options.tool_req 3 "TR-CCX-CS-Case-Split-Progress";
           (* The choice participates to the inconsistency *)
@@ -487,7 +487,7 @@ module Main_Default : S = struct
           try
             let env, ch = CC_X.assume_literals t.gamma_finite [] facts in
             look_for_sat ch t env [] ~for_model
-          with Ex.Inconsistent (dep, classes) ->
+          with Uf.Inconsistent (dep, classes) ->
             Options.tool_req 3 "TR-CCX-CS-Case-Split-Erase-Choices";
             (* we replay the conflict in look_for_sat, so we can
                safely ignore the explanation which is not useful *)
@@ -496,10 +496,10 @@ module Main_Default : S = struct
             Debug.split_sat_contradicts_cs filt_choices;
             look_for_sat ~bad_last:(Some (dep, classes))
               [] { t with choices = []} t.gamma filt_choices ~for_model
-      with Ex.Inconsistent (d, cl) ->
+      with Uf.Inconsistent (d, cl) ->
         Debug.end_case_split t.choices;
         Options.tool_req 3 "TR-CCX-CS-Conflict";
-        raise (Ex.Inconsistent (d, cl))
+        raise (Uf.Inconsistent (d, cl))
     in
     Debug.end_case_split (fst r).choices; r
 
@@ -680,7 +680,7 @@ module Main_Default : S = struct
           let na = E.neg a in
           let t = add_and_process_conseqs na t in
           CC_X.query t.gamma na
-      with Ex.Inconsistent (d, classes) ->
+      with Uf.Inconsistent (d, classes) ->
         Some (d, classes)
 
   let add_term_in_gm gm t =

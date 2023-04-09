@@ -162,13 +162,13 @@ module Container : Inequalities.Container_SIG = struct
       match sim_res with
       | Unsat _  | Eq_unsat -> acc
       | Unbound { vals; _ } ->
-        raise (Ex.Inconsistent (explain vals constrs, []))
+        raise (Uf.Inconsistent (explain vals constrs, []))
       (* XXX: parties reelles nulles *)
       | Max { vof = (re, eps); vals = vals; _ } ->
         assert (Q.is_zero re);
         let expl = explain vals constrs in
         let cmp = Q.compare eps Q.zero in
-        if cmp > 0 then raise(Ex.Inconsistent (expl, []));
+        if cmp > 0 then raise(Uf.Inconsistent (expl, []));
         let dep =
           List.fold_left
             (fun dep (ld,(re_ld, eps_ld)) ->
@@ -240,7 +240,7 @@ module Container : Inequalities.Container_SIG = struct
       match sim_res with
       | Unsat _ | Eq_unsat -> acc
       | Unbound { vals; _ } ->
-        raise (Ex.Inconsistent (explain vals constrs, []))
+        raise (Uf.Inconsistent (explain vals constrs, []))
       | Max { vof = (vof, eps); vals; _} -> (* XXX: parties avec eps nulles *)
         assert (Q.is_zero eps);
         let expl = explain vals constrs in

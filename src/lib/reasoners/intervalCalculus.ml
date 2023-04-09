@@ -138,7 +138,7 @@ module Sim_Wrap = struct
         Printer.print_dbg
           ~module_name:"IntervalCalculus" ~function_name:"check_unsat_result"
           "simplex derived unsat: %a" Explanation.print ex;
-      raise (Ex.Inconsistent (ex, env.classes))
+      raise (Uf.Inconsistent (ex, env.classes))
 
   let solve env _i =
     let int_sim = Sim.Solve.solve env.int_sim in
@@ -1083,7 +1083,7 @@ let add_inequations are_eq acc x_opt lin =
        match ineq_status ineq with
        | Bottom           ->
          Debug.added_inequation "Bottom" ineq;
-         raise (Ex.Inconsistent (expl, env.classes))
+         raise (Uf.Inconsistent (expl, env.classes))
 
        | Trivial_eq       ->
          Debug.added_inequation "Trivial_eq" ineq;
@@ -1142,7 +1142,7 @@ let split_problem env ineqs aliens =
          match ineq_status ineq with
          | Trivial_eq | Trivial_ineq _ -> (acc, all_lvs)
          | Bottom ->
-           raise (Ex.Inconsistent (ineq.Oracle.expl, env.classes))
+           raise (Uf.Inconsistent (ineq.Oracle.expl, env.classes))
          | _ ->
            let lvs =
              List.fold_left (fun acc e -> SX.add e acc) SX.empty (aliens p)
@@ -1353,7 +1353,7 @@ let add_disequality are_eq env eqs p expl =
   match P.to_list p with
   | ([], v) ->
     if Q.sign v = 0 then
-      raise (Ex.Inconsistent (expl, env.classes));
+      raise (Uf.Inconsistent (expl, env.classes));
     env, eqs
   | ([a, x], v) ->
     let b = Q.div (Q.minus v) a in
@@ -1388,7 +1388,7 @@ let add_equality are_eq env eqs p expl =
   match P.to_list p with
   | ([], v) ->
     if Q.sign v <> 0 then
-      raise (Ex.Inconsistent (expl, env.classes));
+      raise (Uf.Inconsistent (expl, env.classes));
     env, eqs
 
   | ([a, x], v) ->
@@ -1634,7 +1634,7 @@ let assume ~query env uf la =
                Oracle.create_ineq p1 p2 (n == L.LE) root expl in
              begin
                match ineq_status ineq with
-               | Bottom -> raise (Ex.Inconsistent (expl, env.classes))
+               | Bottom -> raise (Uf.Inconsistent (expl, env.classes))
                | Trivial_eq | Trivial_ineq _ ->
                  {env with inequations=remove_ineq root env.inequations},
                  eqs, new_ineqs,
@@ -1662,7 +1662,7 @@ let assume ~query env uf la =
                match P.is_const p with
                | Some c ->
                  if Q.is_zero c then (* bottom *)
-                   raise (Ex.Inconsistent (expl, env.classes))
+                   raise (Uf.Inconsistent (expl, env.classes))
                  else (* trivial *)
                    let rm = match root with Some a -> a::rm | None -> rm in
                    env, eqs, new_ineqs, rm
@@ -1691,7 +1691,7 @@ let assume ~query env uf la =
 
          with I.NotConsistent expl ->
            Debug.inconsistent_interval expl ;
-           raise (Ex.Inconsistent (expl, env.classes))
+           raise (Uf.Inconsistent (expl, env.classes))
       )
       (env, [], false, []) la
 
@@ -1720,7 +1720,7 @@ let assume ~query env uf la =
       env, {Sig_rel.assume = to_assume; remove = to_remove}
   with I.NotConsistent expl ->
     Debug.inconsistent_interval expl ;
-    raise (Ex.Inconsistent (expl, env.classes))
+    raise (Uf.Inconsistent (expl, env.classes))
 
 
 let assume ~query env uf la =
@@ -1737,7 +1737,7 @@ let query env uf a_ex =
   try
     ignore(assume ~query:true env uf [a_ex]);
     None
-  with Ex.Inconsistent (expl, classes) -> Some (expl, classes)
+  with Uf.Inconsistent (expl, classes) -> Some (expl, classes)
 
 
 let assume env uf la =
@@ -1888,7 +1888,7 @@ let add =
       else env, []
     with I.NotConsistent expl ->
       Debug.inconsistent_interval expl;
-      raise (Ex.Inconsistent (expl, env.classes))
+      raise (Uf.Inconsistent (expl, env.classes))
 
 (*
     let extract_improved env =
@@ -2030,7 +2030,7 @@ let model_from_simplex sim is_int env uf =
     (* when splitting on union of intervals, FM does not include
        related ineqs when crossing. So, we may miss some bounds/deductions,
        and FM-Simplex may fail to find a model *)
-    raise (Ex.Inconsistent(Lazy.force ex, env.classes))
+    raise (Uf.Inconsistent(Lazy.force ex, env.classes))
 
   | Sim.Core.Sat sol ->
     let {Sim.Core.main_vars; slake_vars; int_sol; epsilon=_} = Lazy.force sol in
@@ -2119,7 +2119,7 @@ let best_interval_of optimized env p =
             "TODO: should check that this is correct !!!";
           Errors.warning_as_error ()
         end;
-        raise (Ex.Inconsistent (expl, env.classes))
+        raise (Uf.Inconsistent (expl, env.classes))
 
 let mk_const_term ty s =
   match ty with

@@ -692,7 +692,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         let tenv, _ = Th.do_case_split env.tenv in
         env.tenv <- tenv;
         C_none
-      with Ex.Inconsistent (expl, _) ->
+      with Uf.Inconsistent (expl, _) ->
         C_theory expl
     else C_none
 
@@ -787,7 +787,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   (*   if D1.d then Printer.print_dbg
           "expensive_theory_propagate => None@."; *)
   (*   None *)
-  (* with Ex.Inconsistent dep ->  *)
+  (* with Uf.Inconsistent dep ->  *)
   (*   if D1.d then Printer.print_dbg
        "expensive_theory_propagate => Inconsistent@."; *)
   (*   Some dep *)
@@ -815,7 +815,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         Steps.incr (Steps.Th_assumed cpt);
         env.unit_tenv <- t;
         C_none
-      with Ex.Inconsistent (dep, _terms) ->
+      with Uf.Inconsistent (dep, _terms) ->
         (* XXX what to do with terms ? *)
         (* Printer.print_dbg
            "th inconsistent : %a @." Ex.print dep; *)
@@ -883,7 +883,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           do_case_split env Util.AfterTheoryAssume
         (*if full_model then expensive_theory_propagate ()
           else None*)
-        with Ex.Inconsistent (dep, _terms) ->
+        with Uf.Inconsistent (dep, _terms) ->
           (* XXX what to do with terms ? *)
           (* Printer.print_dbg
              "th inconsistent : %a @." Ex.print dep; *)
@@ -1087,12 +1087,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
        try
        assume a;
        try assume a.neg
-       with Ex.Inconsistent _ ->
+       with Uf.Inconsistent _ ->
        if debug () then
        Printer.print_dbg
        "%a propagated m/theory at level 0@." Atom.pr_atom a;
        enqueue a 0 None (* Mettre Some dep pour les unsat-core*)
-       with Ex.Inconsistent _ ->
+       with Uf.Inconsistent _ ->
        if debug () then
        Printer.print_dbg
        "%a propagated m/theory at level 0@." Atom.pr_atom a.neg;
@@ -1322,7 +1322,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   dep;
 (* ignore (Th.expensive_processing !env); *)
   assert false
-  with Ex.Inconsistent _ -> ()
+  with Uf.Inconsistent _ -> ()
 *)
 
 

@@ -30,6 +30,8 @@
 
 type t
 
+exception Inconsistent of Explanation.t * Expr.Set.t list
+
 type r = Shostak.Combine.r
 
 module LX : Xliteral.S with type elt = r

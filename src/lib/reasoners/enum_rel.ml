@@ -118,7 +118,7 @@ let add_diseq hss sm1 sm2 dep env eqs =
     let enum, ex = try MX.find r env.mx with Not_found -> hss, Ex.empty in
     let enum = HSS.remove h enum in
     let ex = Ex.union ex dep in
-    if HSS.is_empty enum then raise (Ex.Inconsistent (ex, env.classes))
+    if HSS.is_empty enum then raise (Uf.Inconsistent (ex, env.classes))
     else
       let env = { env with mx = MX.add r (enum, ex) env.mx } in
       if HSS.cardinal enum = 1 then
@@ -160,7 +160,7 @@ let add_eq hss sm1 sm2 dep env eqs =
   | Cons (h,_), Alien r  ->
     let enum, ex = try MX.find r env.mx with Not_found -> hss, Ex.empty in
     let ex = Ex.union ex dep in
-    if not (HSS.mem h enum) then raise (Ex.Inconsistent (ex, env.classes));
+    if not (HSS.mem h enum) then raise (Uf.Inconsistent (ex, env.classes));
     {env with mx = MX.add r (HSS.singleton h, ex) env.mx} , eqs
 
   | Alien r1, Alien r2   ->
@@ -170,7 +170,7 @@ let add_eq hss sm1 sm2 dep env eqs =
       try MX.find r2 env.mx with Not_found -> hss, Ex.empty in
     let ex = Ex.union dep (Ex.union ex1 ex2) in
     let diff = HSS.inter enum1 enum2 in
-    if HSS.is_empty diff then raise (Ex.Inconsistent (ex, env.classes));
+    if HSS.is_empty diff then raise (Uf.Inconsistent (ex, env.classes));
     let mx = MX.add r1 (diff, ex) env.mx in
     let env = {env with mx = MX.add r2 (diff, ex) mx } in
     if HSS.cardinal diff = 1 then
@@ -272,7 +272,7 @@ let case_split env uf ~for_model =
 
 let query env uf a_ex =
   try ignore(assume env uf [a_ex]); None
-  with Ex.Inconsistent (expl, classes) -> Some (expl, classes)
+  with Uf.Inconsistent (expl, classes) -> Some (expl, classes)
 
 let assume env uf la =
   if Options.get_timers() then

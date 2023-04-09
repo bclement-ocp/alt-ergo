@@ -100,6 +100,7 @@ type t = {
   ac_rs : SetRL.t RS.t;
 }
 
+exception Inconsistent of Explanation.t * Expr.Set.t list
 
 exception Found_term of E.t
 
@@ -487,7 +488,7 @@ module Env = struct
         Options.tool_req 3 "TR-CCX-Congruence-Conflict";
         let ex = Ex.union (Ex.union ex1 ex2) dep in
         let ex = explain_repr_of_distinct x repr_x ex l1 env in
-        raise (Ex.Inconsistent (ex, cl_extract env))
+        raise (Inconsistent (ex, cl_extract env))
       with Not_found ->
         (* with the use of explain_repr_of_distinct above, I
            don't need to propagate dep to ex1 here *)
@@ -754,7 +755,7 @@ let x_solve env r1 r2 dep =
       try X.solve rr1 rr2, dep
       with Util.Unsolvable ->
         Options.tool_req 3 "TR-CCX-Congruence-Conflict";
-        raise (Ex.Inconsistent (dep, cl_extract env))
+        raise (Inconsistent (dep, cl_extract env))
     end
 
 let rec ac_x eqs env tch =
@@ -800,7 +801,7 @@ let rec distinct env rl dep =
          try
            let exr = MapX.find rr mapr in
            Options.tool_req 3 "TR-CCX-Distinct-Conflict";
-           raise (Ex.Inconsistent ((Ex.union ex exr), cl_extract env))
+           raise (Inconsistent ((Ex.union ex exr), cl_extract env))
          with Not_found ->
            let uex = Ex.union ex dep in
            let mdis =
@@ -830,7 +831,7 @@ let rec distinct env rl dep =
                  distinct env [a; b] ex
              | []  ->
                Options.tool_req 3 "TR-CCX-Distinct-Conflict";
-               raise (Ex.Inconsistent (ex, cl_extract env))
+               raise (Inconsistent (ex, cl_extract env))
              | _   -> env
            with Util.Unsolvable -> env) mapr env)
     env newds
@@ -859,7 +860,7 @@ let are_distinct env t1 t2 =
   try
     ignore (union env r1 r2 (Ex.union ex_r1 ex_r2));
     None
-  with Ex.Inconsistent (ex, classes) -> Some (ex, classes)
+  with Inconsistent (ex, classes) -> Some (ex, classes)
 
 let already_distinct env lr =
   let d = LX.mk_distinct false lr in

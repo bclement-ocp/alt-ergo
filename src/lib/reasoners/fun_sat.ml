@@ -421,7 +421,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
 
   let inst_predicates mconf env inst tbox selector ilvl =
     try Inst.m_predicates mconf inst tbox selector ilvl
-    with Ex.Inconsistent (expl, classes) ->
+    with Uf.Inconsistent (expl, classes) ->
       Debug.inconsistent expl env;
       Options.tool_req 2 "TR-Sat-Conflict-2";
       env.heuristics := Heuristics.bump_activity !(env.heuristics) expl;
@@ -429,7 +429,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
 
   let inst_lemmas mconf env inst tbox selector ilvl =
     try Inst.m_lemmas mconf inst tbox selector ilvl
-    with Ex.Inconsistent (expl, classes) ->
+    with Uf.Inconsistent (expl, classes) ->
       Debug.inconsistent expl env;
       Options.tool_req 2 "TR-Sat-Conflict-2";
       env.heuristics := Heuristics.bump_activity !(env.heuristics) expl;
@@ -634,7 +634,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         let inst =
           Inst.add_terms env.inst new_terms (mk_gf E.vrai "" false false) in
         {env with tbox = tbox; inst = inst}
-      with Ex.Inconsistent (expl, classes) ->
+      with Uf.Inconsistent (expl, classes) ->
         Debug.inconsistent expl env;
         Options.tool_req 2 "TR-Sat-Conflict-2";
         env.heuristics := Heuristics.bump_activity !(env.heuristics) expl;
@@ -824,7 +824,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
                 if Options.get_profiling() then Profiling.bcp_conflict b1 b2;
                 let expl = Ex.union (Ex.union d d1) d2 in
                 let c = List.rev_append c1 c2 in
-                raise (Ex.Inconsistent (expl, c))
+                raise (Uf.Inconsistent (expl, c))
 
               | (Some(d1, _), b) , (None, _) ->
                 if Options.get_profiling() then Profiling.red b;
@@ -877,7 +877,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       let utbox, _, _ = (* assume unit facts in the theory *)
         if ufacts != [] && env.dlevel > 0 then
           try Th.assume ~ordered:false ufacts env.unit_tbox
-          with Ex.Inconsistent (reason, _) as e ->
+          with Uf.Inconsistent (reason, _) as e ->
             assert (Ex.has_no_bj reason);
             if Options.get_profiling() then Profiling.theory_conflict();
             if Options.get_debug_sat () then
@@ -889,7 +889,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       in
       let tbox, new_terms, cpt =
         try Th.assume facts env.tbox
-        with Ex.Inconsistent _ as e ->
+        with Uf.Inconsistent _ as e ->
           if Options.get_profiling() then Profiling.theory_conflict();
           raise e
       in
@@ -1067,7 +1067,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         let result = asm_aux (env, false, false, [], []) list in
         let env, list = propagations result in
         assume env list
-      with Ex.Inconsistent (expl, classes) ->
+      with Uf.Inconsistent (expl, classes) ->
         Debug.inconsistent expl env;
         Options.tool_req 2 "TR-Sat-Conflict-2";
         env.heuristics := Heuristics.bump_activity !(env.heuristics) expl;
@@ -1149,7 +1149,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         let env = {env with tbox = Th.compute_concrete_model env.tbox} in
         latest_saved_env := Some env;
         env
-      with Ex.Inconsistent (expl, classes) ->
+      with Uf.Inconsistent (expl, classes) ->
         Debug.inconsistent expl env;
         Options.tool_req 2 "TR-Sat-Conflict-2";
         env.heuristics := Heuristics.bump_activity !(env.heuristics) expl;
@@ -1298,7 +1298,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         ignore (update_instances_cache (Some []));
         Debug.out_mk_theories_instances true;
         env, l != []
-    with Ex.Inconsistent (expl, classes) ->
+    with Uf.Inconsistent (expl, classes) ->
       Debug.out_mk_theories_instances false;
       Debug.inconsistent expl env;
       Options.tool_req 2 "TR-Sat-Conflict-2";

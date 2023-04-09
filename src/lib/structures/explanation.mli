@@ -36,8 +36,6 @@ type exp =
   | Dep of Expr.t
   | RootDep of rootdep
 
-exception Inconsistent of t * Expr.Set.t list
-
 val empty : t
 
 val is_empty : t -> bool

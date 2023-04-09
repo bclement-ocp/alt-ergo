@@ -90,7 +90,7 @@ module Make(X : Theory.S) : S with type tbox = X.t = struct
          in various places will be raised. *)
       let term_repr t e ~init_term =
         try Ccx.Main.term_repr t ~init_term e
-        with Ex.Inconsistent (d, _) as exn ->
+        with Uf.Inconsistent (d, _) as exn ->
           if Ex.exists_fresh d then e else raise exn
 
     end)

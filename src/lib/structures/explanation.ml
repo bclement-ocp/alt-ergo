@@ -65,8 +65,6 @@ let is_empty t = S.is_empty t
 
 type t = S.t
 
-exception Inconsistent of t * Expr.Set.t list
-
 let empty = S.empty
 
 let union s1 s2 =

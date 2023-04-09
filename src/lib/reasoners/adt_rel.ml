@@ -384,7 +384,7 @@ let add_diseq uf hss sm1 sm2 dep env eqs =
     in
     let enum = HSS.remove h enum in
     let ex = Ex.union ex dep in
-    if HSS.is_empty enum then raise (Ex.Inconsistent (ex, env.classes))
+    if HSS.is_empty enum then raise (Uf.Inconsistent (ex, env.classes))
     else
       let env = { env with domains = MX.add r (enum, ex) env.domains } in
       if HSS.cardinal enum = 1 then
@@ -435,7 +435,7 @@ let assoc_and_remove_selector hs r env =
 let assume_is_constr uf hs r dep env eqs =
   match Th.embed r with
   | Adt.Constr{ c_name; _ } when not (Hs.equal c_name hs) ->
-    raise (Ex.Inconsistent (dep, env.classes));
+    raise (Uf.Inconsistent (dep, env.classes));
   | _ ->
     if Options.get_debug_adt () then
       Printer.print_dbg
@@ -463,14 +463,14 @@ let assume_is_constr uf hs r dep env eqs =
         | Some s -> s, Ex.empty
       in
       let ex = Ex.union ex dep in
-      if not (HSS.mem hs enum) then raise (Ex.Inconsistent (ex, env.classes));
+      if not (HSS.mem hs enum) then raise (Uf.Inconsistent (ex, env.classes));
       let env, eqs = deduce_is_constr uf r hs eqs env ex in
       {env with domains = MX.add r (HSS.singleton hs, ex) env.domains} , eqs
 
 let assume_not_is_constr uf hs r dep env eqs =
   match Th.embed r with
   | Adt.Constr{ c_name; _ } when Hs.equal c_name hs ->
-    raise (Ex.Inconsistent (dep, env.classes));
+    raise (Uf.Inconsistent (dep, env.classes));
   | _ ->
 
     let _, env = assoc_and_remove_selector hs r env in
@@ -486,7 +486,7 @@ let assume_not_is_constr uf hs r dep env eqs =
     else
       let enum = HSS.remove hs enum in
       let ex = Ex.union ex dep in
-      if HSS.is_empty enum then raise (Ex.Inconsistent (ex, env.classes))
+      if HSS.is_empty enum then raise (Uf.Inconsistent (ex, env.classes))
       else
         let env = { env with domains = MX.add r (enum, ex) env.domains } in
         if HSS.cardinal enum = 1 then
@@ -506,7 +506,7 @@ let add_eq uf hss sm1 sm2 dep env eqs =
       try MX.find r env.domains with Not_found -> hss, Ex.empty
     in
     let ex = Ex.union ex dep in
-    if not (HSS.mem h enum) then raise (Ex.Inconsistent (ex, env.classes));
+    if not (HSS.mem h enum) then raise (Uf.Inconsistent (ex, env.classes));
     let env, eqs = deduce_is_constr uf r h eqs env ex in
     {env with domains = MX.add r (HSS.singleton h, ex) env.domains} , eqs
 
@@ -517,7 +517,7 @@ let add_eq uf hss sm1 sm2 dep env eqs =
       try MX.find r2 env.domains with Not_found -> hss, Ex.empty in
     let ex = Ex.union dep (Ex.union ex1 ex2) in
     let diff = HSS.inter enum1 enum2 in
-    if HSS.is_empty diff then raise (Ex.Inconsistent (ex, env.classes));
+    if HSS.is_empty diff then raise (Uf.Inconsistent (ex, env.classes));
     let domains = MX.add r1 (diff, ex) env.domains in
     let env = {env with domains = MX.add r2 (diff, ex) domains } in
     if HSS.cardinal diff = 1 then begin
@@ -704,7 +704,7 @@ let query env uf (ra, _, ex, _) =
       | _ ->
         None
     with
-    | Ex.Inconsistent (expl, classes) -> Some (expl, classes)
+    | Uf.Inconsistent (expl, classes) -> Some (expl, classes)
 
 
 (* ################################################################ *)

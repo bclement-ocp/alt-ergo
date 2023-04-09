@@ -723,7 +723,7 @@ module Main : S = struct
       try
         let env, _ = assume_literals env [] facts in
         Uf.are_equal env.uf t1 t2 ~added_terms:true
-      with Ex.Inconsistent (ex,cl) -> Some (ex, cl)
+      with Uf.Inconsistent (ex,cl) -> Some (ex, cl)
     else
       Uf.are_equal env.uf t1 t2 ~added_terms:false
 
