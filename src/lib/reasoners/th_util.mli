@@ -26,7 +26,7 @@
 (*                                                                            *)
 (******************************************************************************)
 
-type answer = (Explanation.t * Expr.Set.t list) option
+type answer = (Explanation.t * Uf.eclass list) option
 
 
 type theory =

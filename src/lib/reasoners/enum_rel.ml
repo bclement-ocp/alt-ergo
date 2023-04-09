@@ -42,7 +42,7 @@ module HSS = Set.Make (struct type t=Hs.t let compare = Hs.compare end)
 
 module LR = Uf.LX
 
-type t = { mx : (HSS.t * Ex.t) MX.t; classes : Expr.Set.t list;
+type t = { mx : (HSS.t * Ex.t) MX.t; classes : Uf.eclass list;
            size_splits : Numbers.Q.t }
 
 let empty classes = { mx = MX.empty; classes = classes;

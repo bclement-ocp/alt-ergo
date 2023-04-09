@@ -113,7 +113,7 @@ type t = {
   known_eqs : SX.t;
   improved_p : SP.t;
   improved_x : SX.t;
-  classes : SE.t list;
+  classes : Uf.eclass list;
   size_splits : Q.t;
   int_sim : Sim.Core.t;
   rat_sim : Sim.Core.t;

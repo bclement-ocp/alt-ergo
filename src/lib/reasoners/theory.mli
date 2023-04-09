@@ -40,7 +40,7 @@ module type S = sig
     t * Expr.Set.t * int
 
   val query : Expr.t -> t -> Th_util.answer
-  val cl_extract : t -> Expr.Set.t list
+  val cl_extract : t -> Uf.eclass list
   val extract_ground_terms : t -> Expr.Set.t
   val get_real_env : t -> Ccx.Main.t
   val get_case_split_env : t -> Ccx.Main.t

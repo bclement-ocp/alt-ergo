@@ -50,7 +50,7 @@ type 'a result = {
 module type RELATION = sig
   type t
 
-  val empty : Expr.Set.t list -> t
+  val empty : Uf.eclass list -> t
 
   val assume : t ->
     Uf.t -> (Shostak.Combine.r input) list -> t * Shostak.Combine.r result

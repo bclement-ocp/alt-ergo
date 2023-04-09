@@ -29,7 +29,7 @@ module MHs = Hs.Map
 
 type t =
   {
-    classes : E.Set.t list;
+    classes : Uf.eclass list;
     domains : (HSS.t * Explanation.t) MX.t;
     seen_destr : SE.t;
     seen_access : SE.t;

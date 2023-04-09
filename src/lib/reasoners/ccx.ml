@@ -72,7 +72,7 @@ module type S = sig
   val class_of : t -> Expr.t -> Expr.t list
   val are_equal : t -> Expr.t -> Expr.t -> init_terms:bool -> Th_util.answer
   val are_distinct : t -> Expr.t -> Expr.t -> Th_util.answer
-  val cl_extract : t -> Expr.Set.t list
+  val cl_extract : t -> Uf.eclass list
   val term_repr : t -> Expr.t -> init_term:bool -> Expr.t
 
   val get_union_find : t -> Uf.t

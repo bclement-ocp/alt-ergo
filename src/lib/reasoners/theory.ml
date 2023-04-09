@@ -52,7 +52,7 @@ module type S = sig
     t * Expr.Set.t * int
 
   val query : E.t -> t -> Th_util.answer
-  val cl_extract : t -> Expr.Set.t list
+  val cl_extract : t -> Uf.eclass list
   val extract_ground_terms : t -> Expr.Set.t
   val get_real_env : t -> Ccx.Main.t
   val get_case_split_env : t -> Ccx.Main.t
@@ -424,7 +424,7 @@ module Main_Default : S = struct
           if Options.get_bottom_classes () then
             Printer.print_dbg
               "bottom (case-split):%a"
-              Expr.print_tagged_classes classes;
+                 Uf.print_tagged_classes classes;
           aux ch None dl base_env [neg_c, lit_orig, CNeg, dep]
     in
     aux ch bad_last (List.rev t.choices) base_env l

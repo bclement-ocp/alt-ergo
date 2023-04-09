@@ -30,7 +30,9 @@
 
 type t
 
-exception Inconsistent of Explanation.t * Expr.Set.t list
+type eclass
+
+exception Inconsistent of Explanation.t * eclass list
 
 type r = Shostak.Combine.r
 
@@ -51,17 +53,18 @@ val union :
 
 val distinct : t -> r list -> Explanation.t -> t
 
-val are_equal : t -> Expr.t -> Expr.t -> added_terms:bool -> Th_util.answer
-val are_distinct : t -> Expr.t -> Expr.t -> Th_util.answer
+val are_equal : t -> Expr.t -> Expr.t -> added_terms:bool -> (Explanation.t * eclass list) option
+val are_distinct : t -> Expr.t -> Expr.t -> (Explanation.t * eclass list) option
 val already_distinct : t -> r list -> bool
 
 val class_of : t -> Expr.t -> Expr.t list
 
 val fold_rclass_of : t -> (Expr.t -> 'a -> 'a) -> r -> 'a -> 'a
 
-val cl_extract : t -> Expr.Set.t list
+val cl_extract : t -> eclass list
 
 val print : t -> unit
+val print_tagged_classes : eclass list Fmt.t
 val term_repr : t -> Expr.t -> Expr.t
 
 val make : t -> Expr.t -> r (* may raise Not_found *)

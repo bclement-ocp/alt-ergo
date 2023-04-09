@@ -13,7 +13,7 @@ module Make (Th : Theory.S) : sig
 
   type t
 
-  exception Bottom of Explanation.t * Expr.Set.t list * t
+  exception Bottom of Explanation.t * Uf.eclass list * t
 
   val empty : unit -> t
 

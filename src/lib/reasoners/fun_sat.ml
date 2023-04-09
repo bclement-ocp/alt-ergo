@@ -197,7 +197,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
   exception Sat of t
   exception Unsat of Ex.t
   exception I_dont_know of t
-  exception IUnsat of Ex.t * SE.t list
+  exception IUnsat of Ex.t * Uf.eclass list
 
 
   (*BISECT-IGNORE-BEGIN*)
@@ -366,7 +366,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
 
     let bottom classes =
       if Options.get_bottom_classes () then
-        print_dbg "bottom:%a@?" E.print_tagged_classes classes
+        print_dbg "bottom:%a@?" Uf.print_tagged_classes classes
 
     let inconsistent expl env =
       if Options.get_debug_sat () then

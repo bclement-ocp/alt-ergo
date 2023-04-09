@@ -100,6 +100,10 @@ type t = {
   ac_rs : SetRL.t RS.t;
 }
 
+type eclass = Expr.Set.t
+
+let print_tagged_classes = Expr.print_tagged_classes
+
 exception Inconsistent of Explanation.t * Expr.Set.t list
 
 exception Found_term of E.t

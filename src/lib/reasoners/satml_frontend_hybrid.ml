@@ -33,7 +33,7 @@ module Make (Th : Theory.S) = struct
      pending : (E.gformula * Ex.t) list list;
     }
 
-  exception Bottom of Explanation.t * E.Set.t list * t
+  exception Bottom of Explanation.t * Uf.eclass list * t
 
   let empty () =
     {sat = SAT.empty ();
