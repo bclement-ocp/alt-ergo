@@ -893,6 +893,9 @@ let rclass_of env r =
   try MapX.find r env.classes
   with Not_found -> SE.empty
 
+let fold_rclass_of env f r =
+  SE.fold f (rclass_of env r)
+
 let term_repr uf t =
   let st = class_of uf t in
   try SE.min_elt st

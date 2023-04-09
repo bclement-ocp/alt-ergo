@@ -1231,7 +1231,7 @@ let update_linear_dep env rclass_of ineqs =
     List.fold_left
       (fun st { Oracle.ple0; _ } ->
          List.fold_left
-           (fun st (_, x) -> SE.union st (rclass_of x))
+           (fun st (_, x) -> rclass_of SE.add x st)
            st (fst (P.to_list ple0))
       )SE.empty ineqs
   in
@@ -1611,7 +1611,7 @@ let assume ~query env uf la =
   let env = count_splits env la in
   let are_eq = Uf.are_equal uf ~added_terms:true in
   let classes = Uf.cl_extract uf in
-  let rclass_of = Uf.rclass_of uf in
+  let rclass_of = Uf.fold_rclass_of uf in
   let env =
     {env with
      improved_p=SP.empty; improved_x=SX.empty; classes; new_uf = uf}

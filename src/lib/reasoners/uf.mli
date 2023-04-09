@@ -54,7 +54,8 @@ val are_distinct : t -> Expr.t -> Expr.t -> Th_util.answer
 val already_distinct : t -> r list -> bool
 
 val class_of : t -> Expr.t -> Expr.t list
-val rclass_of : t -> r -> Expr.Set.t
+
+val fold_rclass_of : t -> (Expr.t -> 'a -> 'a) -> r -> 'a -> 'a
 
 val cl_extract : t -> Expr.Set.t list
 
