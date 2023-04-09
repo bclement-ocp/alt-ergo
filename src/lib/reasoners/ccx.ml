@@ -690,6 +690,7 @@ module Main : S = struct
     match Rel.case_split env.relation env.uf ~for_model with
     | [] when for_model ->
       let l, uf = Uf.assign_next env.uf in
+      let l = List.map (fun (eq, is_cs) -> (eq, is_cs, Th_util.CS (Th_util.Th_UF, Numbers.Q.one))) l in
       (* try to not to modify uf in the future. It's currently done only
          to add fresh terms in UF to avoid loops *)
       l, {env with uf}

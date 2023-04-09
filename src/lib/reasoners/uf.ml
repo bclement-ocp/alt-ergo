@@ -964,7 +964,7 @@ let distinct_from_constants rep env =
     )neqs []
 
 let assign_next env =
-  let acc = ref None in
+  let exception Found of E.t * r * bool in
   let res, env =
     try
       MapX.iter
@@ -978,13 +978,10 @@ let assign_next env =
            in
            match opt with
            | None -> ()
-           | Some (s, is_cs) -> acc := Some (s, r, is_cs); raise Exit
+           | Some (s, is_cs) -> raise (Found (s, r, is_cs))
         )env.classes;
       [], env (* no cs *)
-    with Exit ->
-    match !acc with
-    | None -> assert false
-    | Some (s, rep, is_cs) ->
+    with Found (s, rep, is_cs) ->
       if Options.get_debug_interpretation () then
         Printer.print_dbg
           ~module_name:"Uf" ~function_name:"assign_next"
@@ -997,7 +994,7 @@ let assign_next env =
         *)
       let env, _ =  add env s in (* important for termination *)
       let eq = LX.view (LX.mk_eq rep (make env s)) in
-      [eq, is_cs, Th_util.CS (Th_util.Th_UF, Numbers.Q.one)], env
+      [eq, is_cs], env
   in
   Debug.check_invariants "assign_next" env;
   res, env

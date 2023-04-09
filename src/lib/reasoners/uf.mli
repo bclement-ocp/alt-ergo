@@ -66,7 +66,7 @@ val make : t -> Expr.t -> r (* may raise Not_found *)
 
 val is_normalized : t -> r -> bool
 
-val assign_next : t -> (r Xliteral.view * bool * Th_util.lit_origin) list * t
+val assign_next : t -> (r Xliteral.view * bool) list * t
 
 (** {2 Counterexample function} *)
 
