@@ -202,12 +202,12 @@ module Debug = struct
       print_dbg
         ~module_name:"Uf" ~function_name:"all"
         "@[<v 0>-------------------------------------------------@ \
-         %a%a%a%a%a\
+         %a%a%a%a\
          -------------------------------------------------@]"
         pmake env.make
         prepr env.repr
         prules env.ac_rs
-        pclasses env.classes
+        (* TODO pclasses env.classes *)
         pneqs env.neqs
 
   let lookup_not_found t env =
