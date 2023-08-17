@@ -36,5 +36,7 @@ pkgs.mkShell {
     cmdliner
     ppx_blob
     odoc
+    landmarks
+    landmarks-ppx
   ];
 }

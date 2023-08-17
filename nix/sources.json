@@ -12,6 +12,18 @@
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz",
         "version": "0.9"
     },
+    "landmarks": {
+        "branch": "master",
+        "description": "A Simple Profiling Library for OCaml",
+        "homepage": "",
+        "owner": "LexiFi",
+        "repo": "landmarks",
+        "rev": "b0c753cd2a4c4aa00dffdd3be187d8ed592fabf7",
+        "sha256": "02lr5grxcczikkdvz75vhrpgpfnq7z9svzgxxvimll0ijplgp6js",
+        "type": "tarball",
+        "url": "https://github.com/LexiFi/landmarks/archive/b0c753cd2a4c4aa00dffdd3be187d8ed592fabf7.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    },
     "nixpkgs": {
         "branch": "release-23.05",
         "description": "Nix Packages collection",

@@ -552,7 +552,7 @@ module Env = struct
            else init_leaves env x
       ) env (X.leaves mkr)
 
-  let init_term env t =
+  let[@landmark] init_term env t =
     let mkr, ctx = X.make t in
     let rp, ex = normal_form env mkr in
     let env =
