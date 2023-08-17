@@ -69,7 +69,7 @@ struct
     | X6    of X6.t
     | X7    of X7.t
 
-  type r = {v : rview ; id : int}
+  type r = {v : rview ; id : int ; mutable cell : (r, Expr.t) Uf2.cell option }
 
   (* begin: Hashconsing modules and functions *)
 
@@ -120,17 +120,28 @@ struct
   let reinit_cache () =
     HC.reinit_cache ()
 
-  let hcons v = HC.make v
+  let hcons ?term v =
+    let r = HC.make v in
+    begin match r.cell with
+      | None -> r.cell <- Some (Uf2.cell ?term r)
+      | Some _ -> ()
+    end;
+    r
+
+  let cell r =
+    match r.cell with
+    | Some cell -> cell
+    | None -> assert false
 
   (* end: Hconsing modules and functions *)
 
-  let embed1 x = hcons {v = X1 x; id = -1000 (* dummy *)}
-  let embed2 x = hcons {v = X2 x; id = -1000 (* dummy *)}
-  let embed3 x = hcons {v = X3 x; id = -1000 (* dummy *)}
-  let embed4 x = hcons {v = X4 x; id = -1000 (* dummy *)}
-  let embed5 x = hcons {v = X5 x; id = -1000 (* dummy *)}
-  let embed6 x = hcons {v = X6 x; id = -1000 (* dummy *)}
-  let embed7 x = hcons {v = X7 x; id = -1000 (* dummy *)}
+  let embed1 x = hcons {v = X1 x; id = -1000 (* dummy *); cell = None}
+  let embed2 x = hcons {v = X2 x; id = -1000 (* dummy *); cell = None}
+  let embed3 x = hcons {v = X3 x; id = -1000 (* dummy *); cell = None}
+  let embed4 x = hcons {v = X4 x; id = -1000 (* dummy *); cell = None}
+  let embed5 x = hcons {v = X5 x; id = -1000 (* dummy *); cell = None}
+  let embed6 x = hcons {v = X6 x; id = -1000 (* dummy *); cell = None}
+  let embed7 x = hcons {v = X7 x; id = -1000 (* dummy *); cell = None}
 
   let ac_embed ({ Sig.l; _ } as t) =
     match l with
@@ -140,9 +151,10 @@ struct
     | l     ->
       let sort = List.fast_sort (fun (x,_) (y,_) -> CX.str_cmp x y) in
       let ac = { t with Sig.l = List.rev (sort l) } in
-      hcons {v = Ac ac; id = -1000 (* dummy *)}
+      hcons {v = Ac ac; id = -1000 (* dummy *); cell = None}
 
-  let term_embed t = hcons {v = Term t; id = -1000 (* dummy *)}
+  let term_embed t =
+    hcons ~term:t {v = Term t; id = -1000 (* dummy *); cell = None}
 
   let extract1 = function { v=X1 r; _ } -> Some r | _ -> None
   let extract2 = function { v=X2 r; _ } -> Some r | _ -> None

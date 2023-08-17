@@ -78,18 +78,42 @@ module RS = struct
 
 end
 
+module CacheX = Ephemeron.K1.Make(struct
+    type t = X.r
+
+    let equal = ( == )
+
+    let hash = X.hash
+  end)
+
+let _cache = CacheX.create 17
+
+let cell r = X.cell r
+(*
+    match CacheX.find _cache r with
+    | cell -> cell
+    | exception Not_found ->
+      let cell = Uf2.cell r in
+      CacheX.add _cache r cell;
+      cell *)
+
+let uf_union store x y ex cmp =
+  Uf2.union ~cmp store x y ex
+
 type r = X.r
 
+module St = Store.Historical.Atomic
+
+type store = St.t
+
 type t = {
+  store : store ;
 
   (* term -> [t] *)
-  make : r ME.t;
+  make : (r, Expr.t) Uf2.cell ME.t;
 
-  (* representative table *)
-  repr : (r * Ex.t) MapX.t;
-
-  (* r -> class (of terms) *)
-  classes : SE.t MapX.t;
+  (* r -> [t] *)
+  repr : (r, Expr.t) Uf2.cell MapX.t;
 
   (*associates each value r with the set of semantical values whose
     representatives contains r *)
@@ -109,11 +133,14 @@ exception Found_term of E.t
 let terms_of_distinct env l = match LX.view l with
   | Xliteral.Distinct (false, rl) ->
     let lt =
+      St.read env.store @@ fun store ->
       List.fold_left (fun acc r ->
           try
-            let cl = MapX.find r env.classes in
-            SE.iter (fun t ->
-                if X.equal (ME.find t env.make) r then
+            let cl = Uf2.class' store @@ cell r (* MapX.find r env.repr *)
+            in
+            Uf2.iter (fun t ->
+                let r' = Uf2.value store @@ ME.find t env.make in
+                if X.equal r' r then
                   raise (Found_term t)) cl;
             acc
           with
@@ -132,7 +159,7 @@ let terms_of_distinct env l = match LX.view l with
 
 let cl_extract env =
   if Options.get_bottom_classes () then
-    let classes = MapX.fold (fun _ cl acc -> cl :: acc) env.classes [] in
+    let classes = MapX.fold (fun _ cl acc -> cl :: acc) MapX.empty (* TODO env.classes *) [] in
     MapX.fold (fun _ ml acc ->
         MapL.fold (fun l _ acc -> (terms_of_distinct env l) @ acc) ml acc
       ) env.neqs classes
@@ -150,16 +177,18 @@ module Debug = struct
   let lm_print fmt =
     MapL.iter (fun k dep -> Format.fprintf fmt "%a %a" LX.print k Ex.print dep)
 
-  let pmake fmt m =
+  let pmake store fmt m =
     Format.fprintf fmt "@[<v 2>map:@,";
     ME.iter (fun t r ->
-        Format.fprintf fmt "%a -> %a@," E.print t X.print r) m;
+        Format.fprintf fmt "%a -> %a@," E.print t X.print (Uf2.value store r))
+      m;
     Format.fprintf fmt "@]@,"
 
-  let prepr fmt m =
+  let prepr store fmt m =
     Format.fprintf fmt
       "@[<v 2>------------- UF: Representatives map ----------------@,";
-    MapX.iter (fun r (rr,dep) ->
+    MapX.iter (fun r cell ->
+        let rr, _, dep = Uf2.find store cell in
         Format.fprintf fmt "%a --> %a %a@," X.print r X.print rr Ex.print dep
       ) m;
     Format.fprintf fmt "@]@,"
@@ -199,13 +228,14 @@ module Debug = struct
 
   let all env =
     if Options.get_debug_uf () then
+      St.read env.store @@ fun store ->
       print_dbg
         ~module_name:"Uf" ~function_name:"all"
         "@[<v 0>-------------------------------------------------@ \
          %a%a%a%a\
          -------------------------------------------------@]"
-        pmake env.make
-        prepr env.repr
+        (pmake store) env.make
+        (prepr store) env.repr
         prules env.ac_rs
         (* TODO pclasses env.classes *)
         pneqs env.neqs
@@ -294,13 +324,15 @@ module Debug = struct
         "[uf.%s] invariant broken when calling check_inv_repr_normalized"
         orig
     in
-    fun orig repr ->
+    fun orig env ->
+      St.read env.store @@ fun store ->
       MapX.iter
-        (fun _ (rr, _) ->
+        (fun _r r_cell ->
            List.iter
              (fun x ->
                 try
-                  if not (X.equal x (fst (MapX.find x repr))) then
+                  if not (X.equal x (Uf2.value store @@ cell x (* MapX.find x env.repr *)))
+                  then
                     let () = trace orig in
                     assert false
                 with Not_found ->
@@ -308,34 +340,62 @@ module Debug = struct
                      not AC leaves, which can be created dynamically,
                      not for other, that can be introduced by make and solve*)
                   ()
-             )(X.leaves rr)
-        )repr
+             ) (X.leaves @@ Uf2.value store r_cell)
+        ) env.repr
 
   let check_invariants orig env =
     if Options.get_enable_assertions() then begin
-      check_inv_repr_normalized orig env.repr;
+      check_inv_repr_normalized orig env ;
     end
 end
 (*BISECT-IGNORE-END*)
 
 module Env = struct
 
+  (* [repr env r] returns a pair [rp, ex] where [rp] is the current
+     representative for [r] and [ex] is the justification that [r] and [rp] are
+     equal in the current environment. *)
+  let repr env r =
+    try
+      let rp, _, ex =
+        St.read env.store @@
+        fun store -> Uf2.find store @@ cell r (* MapX.find r env.repr *)
+      in
+      rp, ex
+    with Not_found -> r, Ex.empty
+
   let mem env t = ME.mem t env.make
 
   let lookup_by_t t env =
     Options.exec_thread_yield ();
-    try MapX.find (ME.find t env.make) env.repr
+    try
+      let value, _, ex =
+        St.read env.store @@ fun store ->
+        Uf2.find store @@ ME.find t env.make
+      in
+      value, ex
     with Not_found ->
       Debug.lookup_not_found t env;
       assert false (*X.make t, Ex.empty*) (* XXXX *)
 
   let lookup_by_t___without_failure t env =
-    try MapX.find (ME.find t env.make) env.repr
+    try
+      let value, _, ex =
+        St.read env.store @@ fun store ->
+        Uf2.find store @@ ME.find t env.make
+      in
+      value, ex
     with Not_found -> fst (X.make t), Ex.empty
 
   let lookup_by_r r env =
     Options.exec_thread_yield ();
-    try MapX.find r env.repr with Not_found -> r, Ex.empty
+    try
+      let value, _, ex =
+        St.read env.store @@ fun store ->
+        Uf2.find store @@ cell r (* MapX.find r env.repr *)
+      in
+      value, ex
+    with Not_found -> r, Ex.empty
 
   let disjoint_union l_1 l_2 =
     let rec di_un (l1,c,l2) (l_1,l_2)=
@@ -405,33 +465,36 @@ module Env = struct
          | Some ac -> p, SetAc.add ac q
       )(SetX.empty,SetAc.empty) (X.leaves r)
 
-  let canon_empty st env =
+  let canon_empty st store =
     SetX.fold
       (fun p ((z, ex) as acc) ->
-         let q, ex_q = lookup_by_r p env in
+         let q, _, ex_q = Uf2.find store @@ cell p in
          if X.equal p q then acc else (p,q)::z, Ex.union ex_q ex)
       st ([], Ex.empty)
 
-  let canon_ac st env =
+  let canon_ac st ac_rs =
     SetAc.fold
       (fun ac (z,ex) ->
-         let rac, ex_ac = apply_rs ac (RS.find ac.h env.ac_rs) in
+         let rac, ex_ac = apply_rs ac (RS.find ac.h ac_rs) in
          if Ac.compare ac rac = 0 then z, ex
          else (X.color ac, X.color rac) :: z, Ex.union ex ex_ac)
       st ([], Ex.empty)
 
   let canon_aux rx = List.fold_left (fun r (p,v) -> X.subst p v r) rx
 
-  let rec canon env r ex_r =
+  let rec canon store env r ex_r =
     let se, sac = filter_leaves r in
-    let subst, ex_subst = canon_empty se env in
-    let subst_ac, ex_ac = canon_ac sac env in (* explications? *)
+    let subst, ex_subst = canon_empty se store in
+    let subst_ac, ex_ac = canon_ac sac env.ac_rs in (* explications? *)
     let r2 = canon_aux (canon_aux r subst_ac) subst in
     let ex_r2 = Ex.union (Ex.union ex_r ex_subst) ex_ac in
-    if X.equal r r2 then r2, ex_r2 else canon env r2 ex_r2
+    if X.equal r r2 then r2, ex_r2 else canon store env r2 ex_r2
 
   let normal_form env r =
-    let rr, ex = canon env r Ex.empty in
+    let rr, ex =
+      St.read env.store @@ fun store ->
+      canon store env r Ex.empty
+    in
     Debug.canon_of r rr;
     rr,ex
 
@@ -439,7 +502,13 @@ module Env = struct
 
   let find_or_normal_form env r =
     Options.exec_thread_yield ();
-    try MapX.find r env.repr with Not_found -> normal_form env r
+    try
+      let value, _, ex =
+        St.read env.store @@ fun store ->
+        Uf2.find store @@ MapX.find r env.repr
+      in
+      value, ex
+    with Not_found -> normal_form env r
 
   let lookup_for_neqs env r =
     Options.exec_thread_yield ();
@@ -506,28 +575,46 @@ module Env = struct
        function again with x == repr_x *)
     MapX.add repr_x mapl (MapX.remove x env.neqs)
 
-  let init_leaf env p =
+  let init_leaf store env p =
     Debug.init_leaf p;
-    let in_repr = MapX.mem p env.repr in
-    let rp, ex_rp =
-      if in_repr then MapX.find p env.repr
-      else normal_form env p
+    let in_repr, r_cell =
+      match MapX.find p env.repr with
+      | r_cell ->
+        true, r_cell
+      | exception Not_found ->
+        false, cell p (* TODO: no term, from cache *)
     in
-    let mk_env = env.make in
+    let rp =
+      if in_repr then
+        Uf2.value store r_cell
+      else (
+        let rp, ex = canon store env p Ex.empty in
+        let rp_cell = cell rp (* TODO: no term, from cache *) in
+        ignore @@ uf_union store r_cell rp_cell ex
+          (fun _p _rp -> 1);
+        rp
+      )
+    in
     let make =
       match X.term_extract p with
-      | Some t, true when not (ME.mem t mk_env) -> ME.add t p mk_env
-      | _ -> mk_env
+      | Some t, true ->
+        (* TODO: union with t cell! *)
+        let t_cell =
+          match ME.find t env.make with
+          | t_cell -> t_cell
+          | exception Not_found -> Uf2.cell ~term:t p
+        in
+        ignore @@ uf_union store t_cell r_cell Ex.empty
+          (fun _t _r -> 1);
+        ME.add t r_cell env.make
+      | _ -> env.make
     in
     let env =
       { env with
-        make    = make;
+        make;
         repr    =
           if in_repr then env.repr
-          else MapX.add p (rp, ex_rp) env.repr;
-        classes =
-          if MapX.mem p env.classes then env.classes
-          else update_classes p rp env.classes;
+          else MapX.add p r_cell env.repr;
         gamma   =
           if in_repr then env.gamma
           else add_to_gamma p rp env.gamma ;
@@ -538,34 +625,46 @@ module Env = struct
     Debug.check_invariants "init_leaf" env;
     env
 
-  let init_leaves env v =
-    let env = List.fold_left init_leaf env (X.leaves v) in
-    init_leaf env v
+  let init_leaves store env v =
+    let env = List.fold_left (init_leaf store) env (X.leaves v) in
+    init_leaf store env v
 
-  let init_new_ac_leaves env mkr =
+  let init_new_ac_leaves store env mkr =
     List.fold_left
       (fun env x ->
          match X.ac_extract x with
          | None -> env
          | Some _ ->
            if MapX.mem x env.repr then env
-           else init_leaves env x
+           else init_leaves store env x
       ) env (X.leaves mkr)
 
   let[@landmark] init_term env t =
     let mkr, ctx = X.make t in
+    let mkr_cell = cell mkr (* TODO: from cache *) in
+    (* TODO: ADD TERM!!! *)
+
     let rp, ex = normal_form env mkr in
-    let env =
-      {env with
-       make    = ME.add t mkr env.make;
-       repr    = MapX.add mkr (rp,ex) env.repr;
-       classes = add_to_classes t rp env.classes;
-       gamma   = add_to_gamma mkr rp env.gamma;
-       neqs    =
-         if MapX.mem rp env.neqs then env.neqs (* pourquoi ce test *)
-         else MapX.add rp MapL.empty env.neqs}
-    in
-    (init_new_ac_leaves env mkr), ctx
+    let cell_rp = cell rp (* TODO: no term, from cache *) in
+    let store, (env, ctx) =
+      St.write env.store @@ fun store ->
+      let () =
+        ignore @@ uf_union store mkr_cell cell_rp ex
+          (fun _mkr _rp -> 1);
+        assert (Uf2.value store mkr_cell == rp);
+      in
+
+      let env =
+        {env with
+         make    = ME.add t mkr_cell env.make;
+         repr    = MapX.add mkr mkr_cell env.repr;
+         gamma   = add_to_gamma mkr rp env.gamma;
+         neqs    =
+           if MapX.mem rp env.neqs then env.neqs (* pourquoi ce test *)
+           else MapX.add rp MapL.empty env.neqs}
+      in
+      (init_new_ac_leaves store env mkr), ctx
+    in { env with store }, ctx
 
   let head_cp eqs env pac ({ Sig.h ; _ } as ac) v dep =
     try (*if RS.mem h env.ac_rs then*)
@@ -636,8 +735,7 @@ module Env = struct
     SetXX.fold
       (fun (rr, nrr) env ->
          { env with
-           neqs = update_neqs rr nrr dep env ;
-           classes = update_classes rr nrr env.classes})
+           neqs = update_neqs rr nrr dep env })
       set env
 
   (* Patch modudo AC for CC: if p is a leaf different from r and r is AC
@@ -655,26 +753,37 @@ module Env = struct
     assert (MapX.mem p env.gamma);
     let use_p = MapX.find p env.gamma in
     try
-      let env, touched_p, global_tch, neqs_to_up =
+      let store, (gamma, touched_p, global_tch, neqs_to_up) =
+        St.write env.store @@ fun store ->
         SetX.fold
-          (fun r ((env, touched_p, global_tch, neqs_to_up) as acc) ->
+          (fun r ((gamma, touched_p, global_tch, neqs_to_up) as acc) ->
              Options.exec_thread_yield ();
-             let rr, ex = MapX.find r env.repr in
+             (* [ex] justifies [r = rr] *)
+             (* TODO: cell r / MapX.find r env.repr *)
+             let rr_cell, ex = Uf2.root store @@ cell r in
+             let rr = Uf2.value store rr_cell in
              let nrr = X.subst p v rr in
              if X.equal rr nrr then acc
              else
-               let ex  = Ex.union ex dep in
-               let env =
-                 {env with
-                  repr = MapX.add r (nrr, ex) env .repr;
-                  gamma = add_to_gamma r nrr env.gamma }
+               let  nrr_cell = cell nrr in (* TODO: no term, from cache *)
+               let gamma = add_to_gamma r nrr gamma in
+               (* [dep] justifies [rr = nrr] *)
+               (* [nex] justifies [rr = root(nrr)] *)
+               let nex =
+                 uf_union store rr_cell nrr_cell dep
+                   (fun _rr _nrr -> 1)
                in
-               env,
+               let nrr = Uf2.value store @@ nrr_cell in
+               assert (MapX.mem r env.repr);
+               (* Now, [ex] justifies [r = nrr] *)
+               let ex = Ex.union ex nex in
+               gamma,
                (r, nrr, ex)::touched_p,
                update_global_tch global_tch p r nrr ex,
                SetXX.add (rr, nrr) neqs_to_up
-          ) use_p (env, [], global_tch, SetXX.empty)
+          ) use_p (env.gamma, [], global_tch, SetXX.empty)
       in
+      let env = { env with store; gamma } in
       (* Correction : Do not update neqs twice for the same r *)
       update_aux dep neqs_to_up env, touched_p, global_tch
 
@@ -683,31 +792,50 @@ module Env = struct
   let up_uf_rs dep env tch =
     if RS.is_empty env.ac_rs then env, tch
     else
-      let env, tch, neqs_to_up = MapX.fold
-          (fun r (rr,ex) ((env, tch, neqs_to_up) as acc) ->
-             Options.exec_thread_yield ();
-             let nrr, ex_nrr = normal_form env rr in
+      let store, (gamma, tch, neqs_to_up) =
+        MapX.fold
+          (fun r r_cell (store, ((gamma, tch, neqs_to_up) as acc)) ->
+             let store, (rr_cell, rr, ex_rr) =
+               St.write store @@ fun store ->
+               Options.exec_thread_yield ();
+               (* [ex_rr] justifies [r = rr] *)
+               let rr_cell, ex_rr = Uf2.root store r_cell in
+               let rr = Uf2.value store rr_cell in
+               rr_cell, rr, ex_rr
+             in
+             (* [ex_nrr] justifies [rr = nrr] *)
+             let nrr, ex_nrr = normal_form { env with store; gamma } rr in
+             St.write store @@ fun store ->
              if X.equal nrr rr then acc
              else
-               let ex = Ex.union ex ex_nrr in
-               let env =
-                 {env with
-                  repr = MapX.add r (nrr, ex) env.repr;
-                  gamma = add_to_gamma r nrr env.gamma }
+               let nrr_cell = cell nrr in (* TODO: from cache *)
+               (* [nex_nrr] justifies [rr = root(nrr)] *)
+               let nex_nrr =
+                 uf_union store rr_cell nrr_cell ex_nrr
+                   (fun _rr _nrr -> 1)
                in
+               let nrr = Uf2.value store nrr_cell in
+               let gamma = add_to_gamma r nrr gamma in
+               (* [ex] justifies [r = nrr] *)
+               let ex = Ex.union ex_rr nex_nrr in
                let tch =
                  if X.is_a_leaf r then (r,[r, nrr, ex],nrr) :: tch
                  else tch
                in
-               env, tch, SetXX.add (rr, nrr) neqs_to_up
-          ) env.repr (env, tch, SetXX.empty)
+               gamma, tch, SetXX.add (rr, nrr) neqs_to_up
+          ) env.repr (env.store, (env.gamma, tch, SetXX.empty))
       in
+      let env = { env with store; gamma } in
       (* Correction : Do not update neqs twice for the same r *)
       update_aux dep neqs_to_up env, tch
 
   let apply_sigma eqs env tch ((p, v, dep) as sigma) =
-    let env = init_leaves env p in
-    let env = init_leaves env v in
+    let store, env =
+      St.write env.store @@ fun store ->
+      let env = init_leaves store env p in
+      init_leaves store env v
+    in
+    let env = { env with store } in
     let env = apply_sigma_ac eqs env sigma in
     let env, touched_sigma, tch = apply_sigma_uf env sigma tch in
     up_uf_rs dep env ((p, touched_sigma, v) :: tch)
@@ -813,8 +941,10 @@ let rec distinct env rl dep =
              with Not_found ->
                MapL.add d uex mdis
            in
-           let env = Env.init_leaf env rr in
-           let env = {env with neqs = MapX.add rr mdis env.neqs} in
+           let store, env =
+             St.write env.store @@ fun store -> Env.init_leaf store env rr
+           in
+           let env = {env with store; neqs = MapX.add rr mdis env.neqs} in
            env, MapX.add rr uex mapr, (rr, ex, mapr)::newds
       )
       (env, MapX.empty, [])
@@ -886,25 +1016,39 @@ let print = Debug.all
 let mem = Env.mem
 
 let class_of env t =
-  try
-    let rt, _ = MapX.find (ME.find t env.make) env.repr in
-    MapX.find rt env.classes
-  with Not_found -> SE.singleton t
+  match ME.find t env.make with
+  | cell ->
+    let class' =
+      St.read env.store @@ fun store ->
+      Uf2.class' store cell
+    in
+    Uf2.fold (fun cls e -> SE.add e cls) SE.empty class'
+  | exception Not_found -> SE.singleton t
 
 let rclass_of env r =
-  try MapX.find r env.classes
-  with Not_found -> SE.empty
+  match MapX.find r env.repr with
+  | cell ->
+    let class' =
+      St.read env.store @@ fun store ->
+      Uf2.class' store cell
+    in
+    Uf2.fold (fun cls e -> SE.add e cls) SE.empty class'
+  | exception Not_found -> SE.empty
 
 let term_repr uf t =
-  let st = class_of uf t in
-  try SE.min_elt st
-  with Not_found -> t
+  match ME.find t uf.make with
+  | cell ->
+    St.read uf.store @@ fun store ->
+    Option.value ~default:t @@ Uf2.croot @@ Uf2.class' store cell
+  | exception Not_found -> t
+
+let empty_store = St.create @@ Store.Historical.create ()
 
 let empty () =
   let env = {
+    store = empty_store;
     make  = ME.empty;
     repr = MapX.empty;
-    classes = MapX.empty;
     gamma = MapX.empty;
     neqs = MapX.empty;
     ac_rs = RS.empty
@@ -914,7 +1058,9 @@ let empty () =
   let env, _ = add env E.faux in
   distinct env [X.top (); X.bot ()] Ex.empty
 
-let make uf t = ME.find t uf.make
+let make uf t =
+  St.read uf.store @@ fun store ->
+  Uf2.value store @@ ME.find t uf.make
 
 (*** add wrappers to profile exported functions ***)
 
@@ -934,8 +1080,7 @@ let add env t =
 let is_normalized env r =
   List.for_all
     (fun x ->
-       try X.equal x (fst (MapX.find x env.repr))
-       with Not_found -> true)
+       X.equal x (fst @@ Env.repr env x))
     (X.leaves r)
 
 let distinct_from_constants rep env =
@@ -964,10 +1109,12 @@ let assign_next env =
   let acc = ref None in
   let res, env =
     try
+      St.read env.store @@ fun store ->
       MapX.iter
         (fun r eclass ->
            let eclass =
-             try SE.fold (fun t z -> (t, ME.find t env.make)::z) eclass []
+             try SE.fold (fun t z ->
+                 (t, Uf2.value store @@ ME.find t env.make)::z) eclass []
              with Not_found -> assert false
            in
            let opt =
@@ -976,7 +1123,7 @@ let assign_next env =
            match opt with
            | None -> ()
            | Some (s, is_cs) -> acc := Some (s, r, is_cs); raise Exit
-        )env.classes;
+        ) MapX.empty (* TODO env.classes *);
       [], env (* no cs *)
     with Exit ->
     match !acc with
@@ -1010,13 +1157,12 @@ let model_repr_of_term t env mrepr =
   try ME.find t mrepr, mrepr
   with Not_found ->
     let mk = try ME.find t env.make with Not_found -> assert false in
-    let rep,_ = try MapX.find mk env.repr with Not_found -> assert false in
+    let rep, cls, _ = St.read env.store @@ fun store -> Uf2.find store mk in
+    let cls = Uf2.fold (fun cls t -> t :: cls) [] cls in
     let cls =
-      try SE.elements (MapX.find rep env.classes)
-      with Not_found -> assert false
-    in
-    let cls =
-      try List.rev_map (fun s -> s, ME.find s env.make) cls
+      try
+        St.read env.store @@ fun store ->
+        List.rev_map (fun s -> s, Uf2.value store @@ ME.find s env.make) cls
       with Not_found -> assert false
     in
     let e = X.choose_adequate_model t rep cls in

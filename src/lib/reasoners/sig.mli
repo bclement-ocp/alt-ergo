@@ -104,6 +104,8 @@ module type X = sig
 
   val make : Expr.t -> r * Expr.t list
 
+  val cell : r -> (r, Expr.t) Uf2.cell
+
   val type_info : r -> Ty.t
 
   val str_cmp : r -> r -> int
