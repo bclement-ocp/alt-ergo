@@ -29,7 +29,7 @@ let rec fold f acc = function
 
 type ('a, 'b) data =
     Root of { value : 'a ; rank : int ; tree : 'b tree }
-  | Link of ('a, 'b) cell * ex
+  | Link of 'a * ('a, 'b) cell * ex
 
 and ('a, 'b) cell = ('a, 'b) data St.Ref.t
 
@@ -44,10 +44,10 @@ let cell ?term value =
 let rec find s c =
   match St.Ref.get s c with
   | Root _ -> c, Ex.empty
-  | Link (c', ex) ->
+  | Link (v, c', ex) ->
     let r, ex' = find s c' in
     let ex = Ex.union ex ex' in
-    St.Ref.set s c @@ Link (r, ex);
+    St.Ref.set s c @@ Link (v, r, ex);
     r, ex
 
 let union ?(cmp = fun _ _ -> 0) s x y ex =
@@ -66,7 +66,7 @@ let union ?(cmp = fun _ _ -> 0) s x y ex =
             vx, append tx ty
         in
         let rank = ry in
-        St.Ref.set s x @@ Link (y, ex);
+        St.Ref.set s x @@ Link (vx, y, ex);
         St.Ref.set s y @@ Root { value; rank; tree }
       ) else (
         let value, tree =
@@ -76,7 +76,7 @@ let union ?(cmp = fun _ _ -> 0) s x y ex =
             vy, append ty tx
         in
         let rank = if rx = ry then rx + 1 else rx in
-        St.Ref.set s y @@ Link (x, ex);
+        St.Ref.set s y @@ Link (vy, x, ex);
         St.Ref.set s x @@ Root { value; rank; tree }
       );
 
@@ -89,7 +89,7 @@ let union ?(cmp = fun _ _ -> 0) s x y ex =
 let root s c =
   find (St.unsafe s) c
 
-let find s c =
+let[@landmark] find s c =
   let x, ex = root s c in
   match St.Ref.get s x with
   | Root { value; tree; rank = _ } -> value, tree, ex
@@ -100,5 +100,8 @@ let class' s c =
   class'
 
 let value s c =
+  match St.Ref.get s c with
+  | Root { value; _ } | Link (value, _, _) -> value
+  (*
   let root, _, _= find s c in
-  root
+  root *)

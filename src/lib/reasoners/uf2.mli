@@ -45,7 +45,7 @@ val value : [> `R ] store -> ('a, 'b) cell -> 'a
     a new representative. *)
 val union :
   ?cmp:('a -> 'a -> int) ->
-  [`R | `W ] store -> ('a, 'b) cell -> ('a, 'b) cell -> Explanation.t ->
+  [> `R | `W ] store -> ('a, 'b) cell -> ('a, 'b) cell -> Explanation.t ->
   Explanation.t
 
 (** [find store cell] returns a triple [r, c, ex] where:
