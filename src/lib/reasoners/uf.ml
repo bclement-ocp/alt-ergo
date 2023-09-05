@@ -78,37 +78,16 @@ module RS = struct
 
 end
 
-module CacheX = Ephemeron.K1.Make(struct
-    type t = X.r
-
-    let equal = ( == )
-
-    let hash = X.hash
-  end)
-
-let _cache = CacheX.create 17
-
 let cell r = X.cell r
-(*
-    match CacheX.find _cache r with
-    | cell -> cell
-    | exception Not_found ->
-      let cell = Uf2.cell r in
-      CacheX.add _cache r cell;
-      cell *)
 
 let uf_union store x y ex cmp =
   Uf2.union ~cmp store x y ex
 
 type r = X.r
 
-module St = Store.Historical.Atomic
+module St = Store.Historical
 
-type store = St.t
-
-type t = {
-  store : store ;
-
+type env = {
   (* term -> [t] *)
   make : (r, Expr.t) Uf2.cell ME.t;
 
@@ -126,14 +105,22 @@ type t = {
   ac_rs : SetRL.t RS.t;
 }
 
+type u = St.snapshot * env St.Ref.t
+
+let (empty_snapshot, restore) : _ * (u -> _) =
+  let store = St.create () in
+  let restore (snapshot, rref) =
+    St.restore store snapshot;
+    store, St.Ref.get store rref
+  in
+  St.capture store, restore
 
 exception Found_term of E.t
 
 (* hack: would need an inverse map from semantic values to terms *)
-let terms_of_distinct env l = match LX.view l with
+let terms_of_distinct store env l = match LX.view l with
   | Xliteral.Distinct (false, rl) ->
     let lt =
-      St.read env.store @@ fun store ->
       List.fold_left (fun acc r ->
           try
             let cl = Uf2.class' store @@ cell r (* MapX.find r env.repr *)
@@ -157,11 +144,11 @@ let terms_of_distinct env l = match LX.view l with
   | _ -> assert false
 
 
-let cl_extract env =
+let cl_extract store env =
   if Options.get_bottom_classes () then
     let classes = MapX.fold (fun _ cl acc -> cl :: acc) MapX.empty (* TODO env.classes *) [] in
     MapX.fold (fun _ ml acc ->
-        MapL.fold (fun l _ acc -> (terms_of_distinct env l) @ acc) ml acc
+        MapL.fold (fun l _ acc -> (terms_of_distinct store env l) @ acc) ml acc
       ) env.neqs classes
   else []
 
@@ -226,9 +213,8 @@ module Debug = struct
         Format.fprintf fmt "%a -> %a@ " X.print k lm_print s) m;
     Format.fprintf fmt "@]@ "
 
-  let all env =
+  let all store env =
     if Options.get_debug_uf () then
-      St.read env.store @@ fun store ->
       print_dbg
         ~module_name:"Uf" ~function_name:"all"
         "@[<v 0>-------------------------------------------------@ \
@@ -324,8 +310,7 @@ module Debug = struct
         "[uf.%s] invariant broken when calling check_inv_repr_normalized"
         orig
     in
-    fun orig env ->
-      St.read env.store @@ fun store ->
+    fun orig store env ->
       MapX.iter
         (fun _r r_cell ->
            List.iter
@@ -343,9 +328,9 @@ module Debug = struct
              ) (X.leaves @@ Uf2.value store r_cell)
         ) env.repr
 
-  let check_invariants orig env =
+  let check_invariants orig store env =
     if Options.get_enable_assertions() then begin
-      check_inv_repr_normalized orig env ;
+      check_inv_repr_normalized orig store env ;
     end
 end
 (*BISECT-IGNORE-END*)
@@ -355,43 +340,35 @@ module Env = struct
   (* [repr env r] returns a pair [rp, ex] where [rp] is the current
      representative for [r] and [ex] is the justification that [r] and [rp] are
      equal in the current environment. *)
-  let repr env r =
+  let repr store _env r =
     try
       let rp, _, ex =
-        St.read env.store @@
-        fun store -> Uf2.find store @@ cell r (* MapX.find r env.repr *)
+        Uf2.find store @@ cell r (* MapX.find r env.repr *)
       in
       rp, ex
     with Not_found -> r, Ex.empty
 
   let mem env t = ME.mem t env.make
 
-  let lookup_by_t t env =
+  let lookup_by_t t store env =
     Options.exec_thread_yield ();
     try
-      let value, _, ex =
-        St.read env.store @@ fun store ->
-        Uf2.find store @@ ME.find t env.make
-      in
+      let value, _, ex = Uf2.find store @@ ME.find t env.make in
       value, ex
     with Not_found ->
-      Debug.lookup_not_found t env;
+      Debug.lookup_not_found t store env;
       assert false (*X.make t, Ex.empty*) (* XXXX *)
 
-  let lookup_by_t___without_failure t env =
+  let lookup_by_t___without_failure t store env =
     try
-      let value, _, ex =
-        St.read env.store @@ fun store ->
-        Uf2.find store @@ ME.find t env.make
-      in
+      let value, _, ex = Uf2.find store @@ ME.find t env.make in
       value, ex
     with Not_found -> fst (X.make t), Ex.empty
 
-  let lookup_by_r r env =
+  let lookup_by_r r store _env =
     Options.exec_thread_yield ();
     try
       let value, _, ex =
-        St.read env.store @@ fun store ->
         Uf2.find store @@ cell r (* MapX.find r env.repr *)
       in
       value, ex
@@ -490,9 +467,8 @@ module Env = struct
     let ex_r2 = Ex.union (Ex.union ex_r ex_subst) ex_ac in
     if X.equal r r2 then r2, ex_r2 else canon store env r2 ex_r2
 
-  let normal_form env r =
+  let normal_form store env r =
     let rr, ex =
-      St.read env.store @@ fun store ->
       canon store env r Ex.empty
     in
     Debug.canon_of r rr;
@@ -500,15 +476,14 @@ module Env = struct
 
   (* Fin : Code pour la mise en forme normale modulo env *)
 
-  let find_or_normal_form env r =
+  let find_or_normal_form store env r =
     Options.exec_thread_yield ();
     try
       let value, _, ex =
-        St.read env.store @@ fun store ->
         Uf2.find store @@ MapX.find r env.repr
       in
       value, ex
-    with Not_found -> normal_form env r
+    with Not_found -> normal_form store env r
 
   let lookup_for_neqs env r =
     Options.exec_thread_yield ();
@@ -531,34 +506,34 @@ module Env = struct
          let s = try MapX.find x gamma with Not_found -> SetX.empty in
          MapX.add x (SetX.add r s) gamma) gamma (X.leaves c)
 
-  let explain_repr_of_distinct x repr_x dep lit env =
+  let explain_repr_of_distinct x repr_x dep lit store env =
     match LX.view lit with
     | Xliteral.Distinct (false, ([_;_] as args)) ->
       List.fold_left
-        (fun dep r -> Ex.union dep (snd (find_or_normal_form env r)))
+        (fun dep r -> Ex.union dep (snd (find_or_normal_form store env r)))
         dep args
 
     | Xliteral.Pred (r, _) ->
-      Ex.union dep (snd (find_or_normal_form env r))
+      Ex.union dep (snd (find_or_normal_form store env r))
 
     | Xliteral.Distinct (false, l) ->
       List.fold_left
         (fun d r ->
-           let z, ex = find_or_normal_form env r in
+           let z, ex = find_or_normal_form store env r in
            if X.equal z x || X.equal z repr_x then Ex.union d ex else d
         )dep l
 
     | _ -> assert false
 
   (* r1 = r2 => neqs(r1) \uplus neqs(r2) *)
-  let update_neqs x repr_x dep env =
+  let update_neqs x repr_x dep store env =
     let merge_disjoint_maps l1 ex1 mapl =
       try
         let ex2 = MapL.find l1 mapl in
         Options.tool_req 3 "TR-CCX-Congruence-Conflict";
         let ex = Ex.union (Ex.union ex1 ex2) dep in
-        let ex = explain_repr_of_distinct x repr_x ex l1 env in
-        raise (Ex.Inconsistent (ex, cl_extract env))
+        let ex = explain_repr_of_distinct x repr_x ex l1 store env in
+        raise (Ex.Inconsistent (ex, cl_extract store env))
       with Not_found ->
         (* with the use of explain_repr_of_distinct above, I
            don't need to propagate dep to ex1 here *)
@@ -620,9 +595,9 @@ module Env = struct
           else add_to_gamma p rp env.gamma ;
         neqs    =
           if MapX.mem p env.neqs then env.neqs
-          else update_neqs p rp Ex.empty env }
+          else update_neqs p rp Ex.empty store env }
     in
-    Debug.check_invariants "init_leaf" env;
+    Debug.check_invariants "init_leaf" store env;
     env
 
   let init_leaves store env v =
@@ -639,15 +614,15 @@ module Env = struct
            else init_leaves store env x
       ) env (X.leaves mkr)
 
-  let[@landmark] init_term env t =
+  let[@landmark] init_term store env t =
     let mkr, ctx = X.make t in
     let mkr_cell = cell mkr (* TODO: from cache *) in
     (* TODO: ADD TERM!!! *)
 
-    let rp, ex = normal_form env mkr in
+    let rp, ex = normal_form store env mkr in
     let cell_rp = cell rp (* TODO: no term, from cache *) in
-    let store, (env, ctx) =
-      St.write env.store @@ fun store ->
+    assert (Uf2.value store cell_rp == rp);
+    let (env, ctx) =
       let () =
         ignore @@ uf_union store mkr_cell cell_rp ex
           (fun _mkr _rp -> 1);
@@ -664,7 +639,7 @@ module Env = struct
            else MapX.add rp MapL.empty env.neqs}
       in
       (init_new_ac_leaves store env mkr), ctx
-    in { env with store }, ctx
+    in env, ctx
 
   let head_cp eqs env pac ({ Sig.h ; _ } as ac) v dep =
     try (*if RS.mem h env.ac_rs then*)
@@ -683,7 +658,7 @@ module Env = struct
         (RS.find h env.ac_rs)
     with Not_found -> assert false
 
-  let comp_collapse eqs env (p, v, dep) =
+  let comp_collapse eqs store env (p, v, dep) =
     RS.fold
       (fun _ rls env ->
          SetRL.fold
@@ -692,8 +667,8 @@ module Env = struct
               Steps.incr Steps.Ac;
               let env = {env with ac_rs = RS.remove_rule rul env.ac_rs} in
               let gx = X.color g in
-              let g2, ex_g2 = normal_form env (Ac.subst p v g) in
-              let d2, ex_d2 = normal_form env (X.subst p v d) in
+              let g2, ex_g2 = normal_form store env (Ac.subst p v g) in
+              let d2, ex_d2 = normal_form store env (X.subst p v d) in
               if X.str_cmp g2 d2 <= 0 then begin
                 Debug.collapse_mult g2 d2;
                 let ex = Ex.union
@@ -721,21 +696,21 @@ module Env = struct
       ) env.ac_rs env
 
   (* TODO explications: ajout de dep dans ac_rs *)
-  let apply_sigma_ac eqs env ((p, v, dep) as sigma) =
+  let apply_sigma_ac eqs store env ((p, v, dep) as sigma) =
     match X.ac_extract p with
     | None ->
-      comp_collapse eqs env sigma
+      comp_collapse eqs store env sigma
     | Some r ->
       let env = {env with ac_rs = RS.add_rule (r, v, dep) env.ac_rs} in
-      let env = comp_collapse eqs env sigma in
+      let env = comp_collapse eqs store env sigma in
       head_cp eqs env p r v dep;
       env
 
-  let update_aux dep set env=
+  let update_aux dep set store env =
     SetXX.fold
       (fun (rr, nrr) env ->
          { env with
-           neqs = update_neqs rr nrr dep env })
+           neqs = update_neqs rr nrr dep store env })
       set env
 
   (* Patch modudo AC for CC: if p is a leaf different from r and r is AC
@@ -749,12 +724,11 @@ module Env = struct
       | Some _ -> (r, [r, nrr, ex], nrr) :: global_tch
 
 
-  let apply_sigma_uf env (p, v, dep) global_tch =
+  let apply_sigma_uf store env (p, v, dep) global_tch =
     assert (MapX.mem p env.gamma);
     let use_p = MapX.find p env.gamma in
     try
-      let store, (gamma, touched_p, global_tch, neqs_to_up) =
-        St.write env.store @@ fun store ->
+      let (gamma, touched_p, global_tch, neqs_to_up) =
         SetX.fold
           (fun r ((gamma, touched_p, global_tch, neqs_to_up) as acc) ->
              Options.exec_thread_yield ();
@@ -783,20 +757,19 @@ module Env = struct
                SetXX.add (rr, nrr) neqs_to_up
           ) use_p (env.gamma, [], global_tch, SetXX.empty)
       in
-      let env = { env with store; gamma } in
+      let env = { env with gamma } in
       (* Correction : Do not update neqs twice for the same r *)
-      update_aux dep neqs_to_up env, touched_p, global_tch
+      update_aux dep neqs_to_up store env, touched_p, global_tch
 
     with Not_found -> assert false
 
-  let up_uf_rs dep env tch =
+  let up_uf_rs dep store env tch =
     if RS.is_empty env.ac_rs then env, tch
     else
-      let store, (gamma, tch, neqs_to_up) =
+      let (gamma, tch, neqs_to_up) =
         MapX.fold
-          (fun r r_cell (store, ((gamma, tch, neqs_to_up) as acc)) ->
-             let store, (rr_cell, rr, ex_rr) =
-               St.write store @@ fun store ->
+          (fun r r_cell (((gamma, tch, neqs_to_up) as acc)) ->
+             let (rr_cell, rr, ex_rr) =
                Options.exec_thread_yield ();
                (* [ex_rr] justifies [r = rr] *)
                let rr_cell, ex_rr = Uf2.root store r_cell in
@@ -804,8 +777,7 @@ module Env = struct
                rr_cell, rr, ex_rr
              in
              (* [ex_nrr] justifies [rr = nrr] *)
-             let nrr, ex_nrr = normal_form { env with store; gamma } rr in
-             St.write store @@ fun store ->
+             let nrr, ex_nrr = normal_form store { env with gamma } rr in
              if X.equal nrr rr then acc
              else
                let nrr_cell = cell nrr in (* TODO: from cache *)
@@ -823,43 +795,41 @@ module Env = struct
                  else tch
                in
                gamma, tch, SetXX.add (rr, nrr) neqs_to_up
-          ) env.repr (env.store, (env.gamma, tch, SetXX.empty))
+          ) env.repr ((env.gamma, tch, SetXX.empty))
       in
-      let env = { env with store; gamma } in
+      let env = { env with gamma } in
       (* Correction : Do not update neqs twice for the same r *)
-      update_aux dep neqs_to_up env, tch
+      update_aux dep neqs_to_up store env, tch
 
-  let apply_sigma eqs env tch ((p, v, dep) as sigma) =
-    let store, env =
-      St.write env.store @@ fun store ->
+  let apply_sigma eqs store env tch ((p, v, dep) as sigma) =
+    let env =
       let env = init_leaves store env p in
       init_leaves store env v
     in
-    let env = { env with store } in
-    let env = apply_sigma_ac eqs env sigma in
-    let env, touched_sigma, tch = apply_sigma_uf env sigma tch in
-    up_uf_rs dep env ((p, touched_sigma, v) :: tch)
+    let env = apply_sigma_ac eqs store env sigma in
+    let env, touched_sigma, tch = apply_sigma_uf store env sigma tch in
+    up_uf_rs dep store env ((p, touched_sigma, v) :: tch)
 
 end
 
-let add env t =
+let add store env t =
   Options.tool_req 3 "TR-UFX-Add";
   if ME.mem t env.make then env, []
   else
-    let env, l = Env.init_term env t in
-    Debug.check_invariants "add" env;
+    let env, l = Env.init_term store env t in
+    Debug.check_invariants "add" store env;
     env, l
 
-let ac_solve eqs dep (env, tch) (p, v) =
+let ac_solve eqs dep store (env, tch) (p, v) =
   Debug.ac_solve p v dep;
-  let rv, ex_rv = Env.find_or_normal_form env v in
+  let rv, ex_rv = Env.find_or_normal_form store env v in
   if not (X.equal v rv) then begin
     (* v is not in normal form ==> replay *)
     Queue.push (p, rv, Ex.union dep ex_rv) eqs;
     env, tch
   end
   else
-    let rp, ex_rp = Env.find_or_normal_form env p in
+    let rp, ex_rp = Env.find_or_normal_form store env p in
     if not (X.equal p rp) then begin
       (* p is not in normal form ==> replay *)
       Queue.push (rp, v, Ex.union dep ex_rp) eqs;
@@ -867,11 +837,11 @@ let ac_solve eqs dep (env, tch) (p, v) =
     end
     else
       (* both p and v are in normal form ==> apply subst p |-> v *)
-      Env.apply_sigma eqs env tch (p, v, dep)
+      Env.apply_sigma eqs store env tch (p, v, dep)
 
-let x_solve env r1 r2 dep =
-  let rr1, ex_r1 = Env.find_or_normal_form env r1 in
-  let rr2, ex_r2 = Env.find_or_normal_form env r2 in
+let x_solve store env r1 r2 dep =
+  let rr1, ex_r1 = Env.find_or_normal_form store env r1 in
+  let rr2, ex_r2 = Env.find_or_normal_form store env r2 in
   let dep = Ex.union dep (Ex.union ex_r1 ex_r2) in
   Debug.x_solve rr1 rr2 dep;
   if X.equal rr1 rr2 then begin
@@ -880,29 +850,29 @@ let x_solve env r1 r2 dep =
   end
   else
     begin
-      ignore (Env.update_neqs rr1 rr2 dep env);
+      ignore (Env.update_neqs rr1 rr2 dep store env);
       try X.solve rr1 rr2, dep
       with Util.Unsolvable ->
         Options.tool_req 3 "TR-CCX-Congruence-Conflict";
-        raise (Ex.Inconsistent (dep, cl_extract env))
+        raise (Ex.Inconsistent (dep, cl_extract store env))
     end
 
-let rec ac_x eqs env tch =
+let rec ac_x eqs store env tch =
   if Queue.is_empty eqs then env, tch
   else
     let r1, r2, dep = Queue.pop eqs in
     Debug.ac_x r1 r2;
-    let sbs, dep = x_solve env r1 r2 dep in
-    let env, tch = List.fold_left (ac_solve eqs dep) (env, tch) sbs in
-    if Options.get_debug_uf () then Debug.all env;
-    ac_x eqs env tch
+    let sbs, dep = x_solve store env r1 r2 dep in
+    let env, tch = List.fold_left (ac_solve eqs dep store) (env, tch) sbs in
+    if Options.get_debug_uf () then Debug.all store env;
+    ac_x eqs store env tch
 
-let union env r1 r2 dep =
+let union store env r1 r2 dep =
   Options.tool_req 3 "TR-UFX-Union";
   let equations = Queue.create () in
   Queue.push (r1,r2, dep) equations;
-  let env, res = ac_x equations env [] in
-  Debug.check_invariants "union" env;
+  let env, res = ac_x equations store env [] in
+  Debug.check_invariants "union" store env;
   env, res
 
 let union env r1 r2 dep =
@@ -918,19 +888,19 @@ let union env r1 r2 dep =
   else union env r1 r2 dep
 
 
-let rec distinct env rl dep =
-  Debug.all env;
+let rec distinct store env rl dep =
+  Debug.all store env;
   let d = LX.mk_distinct false rl in
   Debug.distinct d;
   let env, _, newds =
     List.fold_left
       (fun (env, mapr, newds) r ->
          Options.exec_thread_yield ();
-         let rr, ex = Env.find_or_normal_form env r in
+         let rr, ex = Env.find_or_normal_form store env r in
          try
            let exr = MapX.find rr mapr in
            Options.tool_req 3 "TR-CCX-Distinct-Conflict";
-           raise (Ex.Inconsistent ((Ex.union ex exr), cl_extract env))
+           raise (Ex.Inconsistent ((Ex.union ex exr), cl_extract store env))
          with Not_found ->
            let uex = Ex.union ex dep in
            let mdis =
@@ -941,10 +911,10 @@ let rec distinct env rl dep =
              with Not_found ->
                MapL.add d uex mdis
            in
-           let store, env =
-             St.write env.store @@ fun store -> Env.init_leaf store env rr
+           let env =
+             Env.init_leaf store env rr
            in
-           let env = {env with store; neqs = MapX.add rr mdis env.neqs} in
+           let env = {env with neqs = MapX.add rr mdis env.neqs} in
            env, MapX.add rr uex mapr, (rr, ex, mapr)::newds
       )
       (env, MapX.empty, [])
@@ -959,37 +929,37 @@ let rec distinct env rl dep =
                if (X.equal a r1 && X.equal b r2) ||
                   (X.equal a r2 && X.equal b r1) then env
                else
-                 distinct env [a; b] ex
+                 distinct store env [a; b] ex
              | []  ->
                Options.tool_req 3 "TR-CCX-Distinct-Conflict";
-               raise (Ex.Inconsistent (ex, cl_extract env))
+               raise (Ex.Inconsistent (ex, cl_extract store env))
              | _   -> env
            with Util.Unsolvable -> env) mapr env)
     env newds
 
-let distinct env rl dep =
-  let env = distinct env rl dep in
-  Debug.check_invariants "distinct" env;
+let distinct store env rl dep =
+  let env = distinct store env rl dep in
+  Debug.check_invariants "distinct" store env;
   env
 
-let are_equal env t1 t2 ~added_terms =
-  if E.equal t1 t2 then Some (Ex.empty, cl_extract env)
+let are_equal store env t1 t2 ~added_terms =
+  if E.equal t1 t2 then Some (Ex.empty, cl_extract store env)
   else
     let lookup =
       if added_terms then Env.lookup_by_t
       else Env.lookup_by_t___without_failure
     in
-    let r1, ex_r1 = lookup t1 env in
-    let r2, ex_r2 = lookup t2 env in
-    if X.equal r1 r2 then Some (Ex.union ex_r1 ex_r2, cl_extract env)
+    let r1, ex_r1 = lookup t1 store env in
+    let r2, ex_r2 = lookup t2 store env in
+    if X.equal r1 r2 then Some (Ex.union ex_r1 ex_r2, cl_extract store env)
     else None
 
-let are_distinct env t1 t2 =
+let are_distinct store env t1 t2 =
   Debug.are_distinct t1 t2;
-  let r1, ex_r1 = Env.lookup_by_t t1 env in
-  let r2, ex_r2 = Env.lookup_by_t t2 env in
+  let r1, ex_r1 = Env.lookup_by_t t1 store env in
+  let r2, ex_r2 = Env.lookup_by_t t2 store env in
   try
-    ignore (union env r1 r2 (Ex.union ex_r1 ex_r2));
+    ignore (union store env r1 r2 (Ex.union ex_r1 ex_r2));
     None
   with Ex.Inconsistent (ex, classes) -> Some (ex, classes)
 
@@ -1003,63 +973,68 @@ let already_distinct env lr =
     true
   with Not_found -> false
 
-let find env t =
+let find store env t =
   Options.tool_req 3 "TR-UFX-Find";
-  Env.lookup_by_t t env
+  Env.lookup_by_t t store env
 
-let find_r =
+let find_r store env t =
   Options.tool_req 3 "TR-UFX-Find";
-  Env.find_or_normal_form
+  Env.find_or_normal_form store env t
 
 let print = Debug.all
 
 let mem = Env.mem
 
-let class_of env t =
+let class_of store env t =
   match ME.find t env.make with
   | cell ->
     let class' =
-      St.read env.store @@ fun store ->
       Uf2.class' store cell
     in
     Uf2.fold (fun cls e -> SE.add e cls) SE.empty class'
   | exception Not_found -> SE.singleton t
 
-let rclass_of env r =
+let rclass_of store env r =
   match MapX.find r env.repr with
   | cell ->
     let class' =
-      St.read env.store @@ fun store ->
       Uf2.class' store cell
     in
     Uf2.fold (fun cls e -> SE.add e cls) SE.empty class'
   | exception Not_found -> SE.empty
 
-let term_repr uf t =
+let term_repr store uf t =
   match ME.find t uf.make with
   | cell ->
-    St.read uf.store @@ fun store ->
     Option.value ~default:t @@ Uf2.croot @@ Uf2.class' store cell
   | exception Not_found -> t
 
-let empty_store = St.create @@ Store.Historical.create ()
 
-let empty () =
-  let env = {
-    store = empty_store;
+let global_ref =
+  St.Ref.make @@ {
     make  = ME.empty;
     repr = MapX.empty;
     gamma = MapX.empty;
     neqs = MapX.empty;
     ac_rs = RS.empty
   }
-  in
-  let env, _ = add env E.vrai in
-  let env, _ = add env E.faux in
-  distinct env [X.top (); X.bot ()] Ex.empty
 
-let make uf t =
-  St.read uf.store @@ fun store ->
+let restore snapshot =
+  restore (snapshot, global_ref)
+
+let capture store env =
+  St.Ref.set store global_ref env;
+  St.capture store
+
+let empty () =
+  let store, env = restore empty_snapshot in
+  let env, _ = add store env E.vrai in
+  let env, _ = add store env E.faux in
+  let env = distinct store env [X.top (); X.bot ()] Ex.empty in
+  St.Ref.set store global_ref env;
+  St.capture store
+
+let make store uf t =
   Uf2.value store @@ ME.find t uf.make
 
 (*** add wrappers to profile exported functions ***)
@@ -1077,10 +1052,10 @@ let add env t =
   else add env t
 
 
-let is_normalized env r =
+let is_normalized store env r =
   List.for_all
     (fun x ->
-       X.equal x (fst @@ Env.repr env x))
+       X.equal x (fst @@ Env.repr store env x))
     (X.leaves r)
 
 let distinct_from_constants rep env =
@@ -1105,11 +1080,10 @@ let distinct_from_constants rep env =
        if !contains_rep then acc2 else acc
     )neqs []
 
-let assign_next env =
+let assign_next store env =
   let acc = ref None in
   let res, env =
     try
-      St.read env.store @@ fun store ->
       MapX.iter
         (fun r eclass ->
            let eclass =
@@ -1139,11 +1113,11 @@ let assign_next env =
           we will not modify env in this function
           !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         *)
-      let env, _ =  add env s in (* important for termination *)
-      let eq = LX.view (LX.mk_eq rep (make env s)) in
+      let env, _ =  add store env s in (* important for termination *)
+      let eq = LX.view (LX.mk_eq rep (make store env s)) in
       [eq, is_cs, Th_util.CS (Th_util.Th_UF, Numbers.Q.one)], env
   in
-  Debug.check_invariants "assign_next" env;
+  Debug.check_invariants "assign_next" store env;
   res, env
 
 (**** Counter examples functions ****)
@@ -1153,22 +1127,21 @@ let is_a_good_model_value (x, _) =
   | [y] -> X.equal x y
   | _ -> false
 
-let model_repr_of_term t env mrepr =
+let model_repr_of_term t store env mrepr =
   try ME.find t mrepr, mrepr
   with Not_found ->
     let mk = try ME.find t env.make with Not_found -> assert false in
-    let rep, cls, _ = St.read env.store @@ fun store -> Uf2.find store mk in
+    let rep, cls, _ = Uf2.find store mk in
     let cls = Uf2.fold (fun cls t -> t :: cls) [] cls in
     let cls =
       try
-        St.read env.store @@ fun store ->
         List.rev_map (fun s -> s, Uf2.value store @@ ME.find s env.make) cls
       with Not_found -> assert false
     in
     let e = X.choose_adequate_model t rep cls in
     e, ME.add t e mrepr
 
-let compute_concrete_model ({ make; _ } as env) =
+let compute_concrete_model store ({ make; _ } as env) =
   ME.fold
     (fun t _mk ((fprofs, cprofs, carrays, mrepr) as acc) ->
        let { E.f; xs; ty; _ } = E.term_view t in
@@ -1181,14 +1154,14 @@ let compute_concrete_model ({ make; _ } as env) =
          let xs, tys, mrepr =
            List.fold_left
              (fun (xs, tys, mrepr) x ->
-                let rep_x, mrepr = model_repr_of_term x env mrepr in
+                let rep_x, mrepr = model_repr_of_term x store env mrepr in
                 assert (is_a_good_model_value rep_x);
                 (x, rep_x)::xs,
                 (E.type_info x)::tys,
                 mrepr
              ) ([],[], mrepr) (List.rev xs)
          in
-         let rep, mrepr = model_repr_of_term t env mrepr in
+         let rep, mrepr = model_repr_of_term t store env mrepr in
          assert (is_a_good_model_value rep);
          match f, xs, ty with
          | Sy.Op Sy.Set, _, _ -> acc
@@ -1218,10 +1191,10 @@ let compute_concrete_model ({ make; _ } as env) =
     ) make
     (ModelMap.empty, ModelMap.empty, ModelMap.empty, ME.empty)
 
-let output_concrete_model fmt ~prop_model env =
+let output_concrete_model fmt ~prop_model store env =
   if Options.get_interpretation () then
     let functions, constants, arrays, _ =
-      compute_concrete_model env in
+      compute_concrete_model store env in
     Models.output_concrete_model fmt prop_model ~functions ~constants ~arrays
 
 let save_cache () =
@@ -1229,3 +1202,66 @@ let save_cache () =
 
 let reinit_cache () =
   LX.reinit_cache ()
+
+(* Public signature *)
+type t = St.snapshot
+
+let empty () = empty ()
+
+let write snap f x =
+  let store, env = restore snap in
+  let env, res = f store env x in
+  capture store env, res
+
+let read snap f x =
+  let store, env = restore snap in
+  f store env x
+
+let add snap = write snap add
+
+let mem snap = read snap (fun _ -> mem)
+
+let find snap = read snap find
+
+let find_r snap = read snap find_r
+
+let union snap r1 r2 ex =
+  write snap (fun store env () -> union store env r1 r2 ex) ()
+
+let distinct snap rl dep =
+  let snap, () =
+    write snap (fun store env () -> distinct store env rl dep, ()) ()
+  in snap
+
+let are_equal snap e1 e2 ~added_terms =
+  read snap (fun store env () -> are_equal store env e1 e2 ~added_terms) ()
+
+let are_distinct snap e1 e2 =
+  read snap (fun store env () -> are_distinct store env e1 e2) ()
+
+let already_distinct snap = read snap (fun _ -> already_distinct)
+
+let class_of snap = read snap class_of
+
+let rclass_of snap = read snap rclass_of
+
+let cl_extract snap = read snap (fun store env () -> cl_extract store env) ()
+
+let print snap = read snap (fun store env () -> print store env) ()
+
+let term_repr snap = read snap term_repr
+
+let make snap = read snap make
+
+let is_normalized snap = read snap is_normalized
+
+let assign_next snap =
+  let snap, res =
+    write snap (fun store env () ->
+        let res, env = assign_next store env in
+        env, res) ()
+  in res, snap
+
+let output_concrete_model ppf ~prop_model snap =
+  read snap
+    (fun store env () -> output_concrete_model ppf ~prop_model store env) ()
