@@ -50,7 +50,7 @@ let rec find s c =
     St.Ref.set s c @@ Link (v, r, ex);
     r, ex
 
-let union ?(cmp = fun _ _ -> 0) s x y ex =
+let union ?(cmp = fun _ _ -> 0) s x y ex merge =
   let x, exx = find s x and y, exy = find s y in
   let ex = Ex.union exx ex in
   let ex = Ex.union exy ex in
@@ -59,21 +59,33 @@ let union ?(cmp = fun _ _ -> 0) s x y ex =
     | Root { value = vx; rank = rx ; tree = tx }
     , Root { value = vy; rank = ry ; tree = ty } ->
       if rx < ry then (
-        let value, tree =
+        let tree =
           if cmp vx vy >= 0 then
-            vy, append ty tx
+            append tx ty
           else
-            vx, append tx ty
+            append ty tx
+        in
+        let value =
+          if merge vx vy >= 0 then
+            vy
+          else
+            vx
         in
         let rank = ry in
         St.Ref.set s x @@ Link (vx, y, ex);
         St.Ref.set s y @@ Root { value; rank; tree }
       ) else (
-        let value, tree =
+        let tree =
           if cmp vx vy <= 0 then
-            vx, append tx ty
+            append tx ty
           else
-            vy, append ty tx
+            append ty tx
+        in
+        let value =
+          if merge vx vy <= 0 then
+            vx
+          else
+            vy
         in
         let rank = if rx = ry then rx + 1 else rx in
         St.Ref.set s y @@ Link (vy, x, ex);

@@ -46,6 +46,7 @@ val value : [> `R ] store -> ('a, 'b) cell -> 'a
 val union :
   ?cmp:('a -> 'a -> int) ->
   [> `R | `W ] store -> ('a, 'b) cell -> ('a, 'b) cell -> Explanation.t ->
+  ('a -> 'a -> int) ->
   Explanation.t
 
 (** [find store cell] returns a triple [r, c, ex] where:

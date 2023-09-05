@@ -81,7 +81,7 @@ end
 let cell r = X.cell r
 
 let uf_union store x y ex cmp =
-  Uf2.union ~cmp store x y ex
+  Uf2.union ~cmp:(fun a b -> X.str_cmp b a) store x y ex cmp
 
 type r = X.r
 
@@ -1006,7 +1006,23 @@ let rclass_of store env r =
 let term_repr store uf t =
   match ME.find t uf.make with
   | cell ->
-    Option.value ~default:t @@ Uf2.croot @@ Uf2.class' store cell
+    let root = Uf2.value store cell in
+    let root_t =
+      match X.term_extract root with
+      | Some t, _ -> t
+      | None, _ -> t
+    in
+    let cls = Uf2.class' store cell in
+    let minterm =
+      Uf2.fold
+        (fun t t' -> if Expr.compare t t' < 0 then t else t')
+        t cls
+    in
+    let croot = Option.value ~default:t @@ Uf2.croot @@ cls in
+    if not (Expr.equal croot minterm) then
+      Format.printf "!! For %a [%a], picking %a instead of %a@."
+        Expr.print t Expr.print root_t Expr.print croot Expr.print minterm;
+    minterm
   | exception Not_found -> t
 
 
