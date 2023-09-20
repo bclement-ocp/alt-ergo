@@ -41,7 +41,7 @@
     Fun_sat Inequalities Bitv_rel Th_util Adt Adt_rel
     Instances IntervalCalculus Intervals Ite_rel Ite Matching Matching_types
     Polynome Records Records_rel Satml_frontend_hybrid Satml_frontend Satml
-    Sat_solver Sat_solver_sig Sig Sig_rel Theory Uf Uf2 Use
+    Sat_solver Sat_solver_sig Sig Sig_rel Theory Uf Olduf Uf2 Use
     ; structures
     Commands Errors Explanation Fpa_rounding
     Parsed Profiling Satml_types Symbols

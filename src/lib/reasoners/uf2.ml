@@ -58,22 +58,16 @@ let union ?(cmp = fun _ _ -> 0) s x y ex merge =
     match St.Ref.get s x, St.Ref.get s y with
     | Root { value = vx; rank = rx ; tree = tx }
     , Root { value = vy; rank = ry ; tree = ty } ->
-      if rx < ry then (
+      if merge vx rx vy ry < 0 then (
         let tree =
           if cmp vx vy >= 0 then
             append tx ty
           else
             append ty tx
         in
-        let value =
-          if merge vx vy >= 0 then
-            vy
-          else
-            vx
-        in
         let rank = ry in
         St.Ref.set s x @@ Link (vx, y, ex);
-        St.Ref.set s y @@ Root { value; rank; tree }
+        St.Ref.set s y @@ Root { value = vy; rank; tree }
       ) else (
         let tree =
           if cmp vx vy <= 0 then
@@ -81,15 +75,9 @@ let union ?(cmp = fun _ _ -> 0) s x y ex merge =
           else
             append ty tx
         in
-        let value =
-          if merge vx vy <= 0 then
-            vx
-          else
-            vy
-        in
         let rank = if rx = ry then rx + 1 else rx in
         St.Ref.set s y @@ Link (vy, x, ex);
-        St.Ref.set s x @@ Root { value; rank; tree }
+        St.Ref.set s x @@ Root { value = vx; rank; tree }
       );
 
       ex
@@ -112,8 +100,10 @@ let class' s c =
   class'
 
 let value s c =
+  let root, _, _= find s c in
+  root
+
+
+let make s c =
   match St.Ref.get s c with
   | Root { value; _ } | Link (value, _, _) -> value
-  (*
-  let root, _, _= find s c in
-  root *)

@@ -37,6 +37,7 @@ val cell : ?term:'b -> 'a -> ('a, 'b) cell
 val class' : [> `R ] store -> ('a, 'b) cell -> 'b class'
 
 val value : [> `R ] store -> ('a, 'b) cell -> 'a
+val make : [> `R ] store -> ('a, 'b) cell -> 'a
 
 (** [union store x y ex] adds the equality [x = y] in the store [store], with
     justification [ex].
@@ -46,7 +47,7 @@ val value : [> `R ] store -> ('a, 'b) cell -> 'a
 val union :
   ?cmp:('a -> 'a -> int) ->
   [> `R | `W ] store -> ('a, 'b) cell -> ('a, 'b) cell -> Explanation.t ->
-  ('a -> 'a -> int) ->
+  ('a -> int -> 'a -> int -> int) ->
   Explanation.t
 
 (** [find store cell] returns a triple [r, c, ex] where:

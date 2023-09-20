@@ -377,6 +377,7 @@ module Main : S = struct
 
   let contra_congruence env facts r =
     Options.exec_thread_yield ();
+    Format.printf "%a@." X.print r;
     if X.equal (fst (Uf.find_r env.uf r)) (X.top()) then
       new_facts_by_contra_congruence env facts r E.faux
     else if X.equal (fst (Uf.find_r env.uf r)) (X.bot()) then

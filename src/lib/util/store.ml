@@ -150,9 +150,9 @@ module Historical : Store = struct
       raise e
 
   let protect store f =
-    let snapshot = capture1 store in
+    let snapshot = capture store in
     Fun.protect (fun () -> f store)
-      ~finally:(fun () -> restore1 store snapshot)
+      ~finally:(fun () -> restore store snapshot)
 
   module Ref = struct
     type -'a store = 'a t
