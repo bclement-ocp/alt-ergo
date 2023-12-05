@@ -32,6 +32,68 @@ module ME = Expr.Map
 module E = Expr
 module Hs = Hstring
 
+module BLit = struct
+  type t =
+    | Lterm of Expr.t
+    | Lsem of Shostak.Literal.t
+
+  let pp ppf = function
+    | Lterm e -> E.print ppf e
+    | Lsem a -> Shostak.Literal.print ppf a
+
+  let hash = function
+    | Lterm t -> 2 * Expr.hash t
+    | Lsem a -> 2 * Shostak.Literal.hash a + 1
+
+  let equal l1 l2 =
+    match l1, l2 with
+    | Lterm t1, Lterm t2 -> Expr.equal t1 t2
+    | Lsem a1, Lsem a2 -> Shostak.Literal.equal a1 a2
+    | Lterm _, Lsem _ | Lsem _, Lterm _ -> false
+
+  let compare l1 l2 =
+    match l1, l2 with
+    | Lterm t1, Lterm t2 -> Expr.compare t1 t2
+    | Lterm _, _  -> -1
+    | _, Lterm _ -> 1
+
+    | Lsem a1, Lsem a2 -> Shostak.Literal.compare a1 a2
+
+  let neg = function
+    | Lterm e -> Lterm (Expr.neg e)
+    | Lsem a -> Lsem (Shostak.Literal.neg a)
+
+  let normal_form = function
+    | Lterm e ->
+      (* XXX do better *)
+      (* Note: I don't know what "better" is. *)
+      let is_pos = E.is_positive e in
+      Lterm (if is_pos then e else E.neg e), not is_pos
+    | Lsem a ->
+      let _, is_neg = Shostak.Literal.atom_view a in
+      Lsem (if is_neg then Shostak.Literal.neg a else a), is_neg
+
+  module Table = Hashtbl.Make(struct
+      type nonrec t = t
+
+      let hash = hash
+
+      let equal = equal
+    end)
+
+  module Set = Set.Make(struct
+      type nonrec t = t
+
+      let compare = compare
+    end)
+
+  module Map = Map.Make(struct
+      type nonrec t = t
+
+      let compare = compare
+    end)
+end
+
 module type ATOM = sig
 
   type var =
@@ -48,7 +110,7 @@ module type ATOM = sig
 
   and atom =
     { var : var;
-      lit : E.t;
+      lit : BLit.t;
       neg : atom;
       mutable watched : clause Vec.t;
       mutable is_true : bool;
@@ -79,7 +141,7 @@ module type ATOM = sig
   val pr_clause : Format.formatter -> clause -> unit
   val get_atom : hcons_env -> E.t ->  atom
 
-  val literal : atom -> E.t
+  val literal : atom -> BLit.t
   val weight : atom -> float
   val is_true : atom -> bool
   val neg : atom -> atom
@@ -186,7 +248,7 @@ module Atom : ATOM = struct
 
   and atom =
     { var : var;
-      lit : E.t;
+      lit : BLit.t;
       neg : atom;
       mutable watched : clause Vec.t;
       mutable is_true : bool;
@@ -225,7 +287,7 @@ module Atom : ATOM = struct
   and dummy_atom =
     { var = dummy_var;
       timp = 0;
-      lit = dummy_lit;
+      lit = Lterm dummy_lit;
       watched = {Vec.dummy=dummy_clause; data=[||]; sz=0};
       neg = dummy_atom;
       is_true = false;
@@ -263,7 +325,7 @@ module Atom : ATOM = struct
 
     let atom fmt a =
       Format.fprintf fmt "%s%d%s [index=%d | lit:%a] vpremise={{%a}}"
-        (sign a) (a.var.vid+1) (value a) a.var.index E.print a.lit
+        (sign a) (a.var.vid+1) (value a) a.var.index BLit.pp a.lit
         premise a.var.vpremise
 
     let atoms_vec = Vec.pp atom
@@ -276,10 +338,6 @@ module Atom : ATOM = struct
   let pr_atom = Debug.atom
   let pr_clause = Debug.clause
 
-  let normal_form lit = (* XXX do better *)
-    let is_pos = E.is_positive lit in
-    (if is_pos then lit else E.neg lit), not is_pos
-
   let literal a = a.lit
   let weight a = a.var.weight
 
@@ -287,13 +345,13 @@ module Atom : ATOM = struct
   let level a = a.var.level
   let neg a = a.neg
 
-  module HT = Hashtbl.Make(E)
+  module HT = Hashtbl.Make(BLit)
 
   type hcons_env = { tbl : var HT.t ; cpt : int ref }
 
   let make_var =
     fun hcons lit acc ->
-    let lit, negated = normal_form lit in
+    let lit, negated = BLit.normal_form (Lterm lit) in
     try HT.find hcons.tbl lit, negated, acc
     with Not_found ->
       let cpt = !(hcons.cpt) in
@@ -321,8 +379,8 @@ module Atom : ATOM = struct
           aid = cpt_fois_2 (* aid = vid*2 *) }
       and na =
         { var = var;
-          lit = E.neg lit;
-          watched = Vec.make 10 ~dummy:dummy_clause;
+          lit = BLit.neg lit;
+          watched = Vec.make ~dummy:dummy_clause 10;
           neg = pa;
           is_true = false;
           is_guard = false;
@@ -355,9 +413,10 @@ module Atom : ATOM = struct
   let nb_made_vars hcons = !(hcons.cpt)
 
   let get_atom hcons lit =
+    let lit = BLit.Lterm lit in
     try (HT.find hcons.tbl lit).pa
     with Not_found ->
-    try (HT.find hcons.tbl (E.neg lit)).na
+    try (HT.find hcons.tbl (BLit.neg lit)).na
     with Not_found -> assert false
 
   let make_clause name ali f is_learnt premise =

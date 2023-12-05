@@ -627,6 +627,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           unassign_atom a;
           if a.is_guard then
             env.next_dec_guard <- env.next_dec_guard - 1;
+          (* TODO: do not add back if it is a split *)
           insert_var_order env a.var
         end
       done;
@@ -1015,17 +1016,21 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Ex.singleton (Ex.Literal ta)
           else Ex.empty
         in
-        assert (E.is_ground ta.lit);
+        assert (match ta.lit with Lterm a -> E.is_ground a | Lsem _ -> true);
         let th_imp =
           if ta.timp = -1 then
-            let lit = Atom.literal a in
-            match Th.query lit env.tenv with
-            | Some _ ->
-              a.timp <- 1;
-              a.neg.timp <- 1;
-              true
-            | None ->
+            match Atom.literal a with
+            | Lsem _ ->
+              (* TODO: We probably could propagate splits as well. *)
               false
+            | Lterm lit ->
+              match Th.query lit env.tenv with
+              | Some _ ->
+                a.timp <- 1;
+                a.neg.timp <- 1;
+                true
+              | None ->
+                false
           else
             ta.timp = 1
         in
@@ -1326,6 +1331,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         let lclause =
           Atom.make_clause name learnt vraie_form true history
         in
+        (* TODO: do not learn if it involves splits *)
         Vec.push env.learnts lclause;
         attach_clause env lclause;
         clause_bump_activity env lclause;
@@ -1573,17 +1579,21 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let th_entailed tenv a =
     if Options.get_no_tcp () || not (Options.get_minimal_bj ()) then None
     else
-      let lit = Atom.literal a in
-      match Th.query lit tenv with
-      | Some (d,_) ->
-        a.timp <- 1;
-        Some (clause_of_dep d a)
-      | None  ->
-        match Th.query (E.neg lit) tenv with
+      match Atom.literal a with
+      | Lsem _ ->
+        (* TODO: We probably could propagate splits as well. *)
+        None
+      | Lterm lit ->
+        match Th.query lit tenv with
         | Some (d,_) ->
-          a.neg.timp <- 1;
-          Some (clause_of_dep d a.Atom.neg)
-        | None -> None
+          a.timp <- 1;
+          Some (clause_of_dep d a)
+        | None  ->
+          match Th.query (E.neg lit) tenv with
+          | Some (d,_) ->
+            a.neg.timp <- 1;
+            Some (clause_of_dep d a.Atom.neg)
+          | None -> None
 
   let search env strat n_of_conflicts n_of_learnts =
     let conflictC = ref 0 in

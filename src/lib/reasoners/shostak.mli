@@ -66,3 +66,5 @@ module MXH : Map.S with type key = Combine.r
 
 (** set of semantic values using Combine.hash_cmp *)
 module SXH : Set.S with type elt = Combine.r
+
+module Literal : Xliteral.S with type elt = Combine.r
