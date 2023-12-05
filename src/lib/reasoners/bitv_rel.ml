@@ -805,7 +805,8 @@ let case_split env _uf ~for_model =
           ~module_name:"Bitv_rel" ~function_name:"case_split"
           "[BV-CS-1] Setting %a to 0" X.print lhs;
       [ Uf.LX.mkv_eq lhs zero, true, Th_util.CS (Th_util.Th_bitv, Q.of_int 2) ]
-    | exception Not_found -> []
+    | exception Not_found ->
+      []
 
 let add env uf r t =
   let delayed, eqs = Rel_utils.Delayed.add env.delayed uf r t in

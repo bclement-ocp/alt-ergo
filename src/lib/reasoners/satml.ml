@@ -560,7 +560,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   let decision_level env = Vec.size env.trail_lim
 
-  let nb_assigns env = env.nassign
+  let nb_assigns env = Vec.size env.trail
   let nb_clauses env = Vec.size env.clauses
   (* unused -- let nb_learnts env = Vec.size env.learnts *)
   let nb_vars    env = Vec.size env.vars
@@ -715,25 +715,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     else v
 
   type decision = Atom of Atom.atom | Split of split
-
-  let pick_branch_lit env =
-    if env.next_dec_guard < Vec.size env.increm_guards then
-      begin
-        let a = Vec.get env.increm_guards env.next_dec_guard in
-        (assert (not (a.neg.is_guard || a.neg.is_true)));
-        env.next_dec_guard <- env.next_dec_guard + 1;
-        Atom a
-      end
-    else
-      match env.pending_splits with
-      | split :: splits ->
-        env.pending_splits <- splits;
-        Split split
-      | [] ->
-        match pick_branch_var env with
-        | v -> Atom v.na
-        | exception Sat ->
-          raise Sat
 
 
   let debug_enqueue_level a lvl reason =
@@ -1056,7 +1037,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     if atom.is_true || atom.neg.is_true then (
       None
     ) else (
-      Format.printf "S: %a@." Atom.pr_atom atom;
       Some { atom ; is_cs ; origin }
     )
 
@@ -1127,7 +1107,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          if Lists.is_empty env.pending_splits then (
+          if false && Lists.is_empty env.pending_splits then (
             let pending_splits, tenv = Th.theory_decide t in
             env.tenv <- tenv;
             env.pending_splits <-
@@ -1682,6 +1662,31 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
+  let pick_branch_lit env =
+    if env.next_dec_guard < Vec.size env.increm_guards then
+      begin
+        let a = Vec.get env.increm_guards env.next_dec_guard in
+        (assert (not (a.neg.is_guard || a.neg.is_true)));
+        env.next_dec_guard <- env.next_dec_guard + 1;
+        Atom a
+      end
+    else
+      match env.pending_splits with
+      | split :: splits ->
+        env.pending_splits <- splits;
+        Split split
+      | [] ->
+        match Th.theory_decide env.tenv with
+        | [], _ ->
+          let v = pick_branch_var env in
+          Atom v.na
+        | split :: splits, tenv ->
+          let split = theory_split env split in
+          env.tenv <- tenv;
+          env.pending_splits <-
+            List.filter_map (theory_split env) splits;
+          Split (Option.get split)
+
   let rec pick_and_split env =
     match pick_branch_lit env with
     | Split { atom; is_cs = false; _ } ->
@@ -1703,12 +1708,22 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     while true do
       propagate_and_stabilize env all_propagations conflictC !strat;
 
+      if Lists.is_empty env.pending_splits then (
+        let pending_splits, tenv = Th.theory_decide env.tenv in
+        env.tenv <- tenv;
+        env.pending_splits <-
+          List.filter_map (theory_split env) pending_splits;
+      );
+
       if Lists.is_empty env.pending_splits && (
-          nb_assigns env = nb_vars env ||
+          env.nassign = nb_vars env ||
           (Options.get_cdcl_tableaux_inst () &&
            Matoms.is_empty env.lazy_cnf)
-        ) then
+        ) then (
+        let pending, _ = Th.theory_decide env.tenv in
+        assert (Lists.is_empty pending);
         raise Sat;
+      );
       if Options.get_enable_restarts ()
       && n_of_conflicts >= 0 && !conflictC >= n_of_conflicts then begin
         env.progress_estimate <- progress_estimate env;
