@@ -132,6 +132,7 @@ module type ATOM = sig
   val hash_atom  : atom -> int
   val tag_atom   : atom -> int
 
+  val add_lit_atom : hcons_env -> BLit.t -> var list -> atom * var list
   val add_atom : hcons_env -> Expr.t -> var list -> atom * var list
 
   module Set : Set.S with type elt = atom
@@ -159,6 +160,7 @@ module type FLAT_FORMULA = sig
   val empty_hcons_env : unit -> hcons_env
   val nb_made_vars : hcons_env -> int
   val get_atom : hcons_env -> Expr.t -> Atom.atom
+  val atom_hcons_env : hcons_env -> Atom.hcons_env
 
   val simplify :
     hcons_env ->

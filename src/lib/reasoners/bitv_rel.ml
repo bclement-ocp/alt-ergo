@@ -721,13 +721,12 @@ let assume env uf la =
                     , Domains.subst ex rr nrr dom )
                   ) (bcs, dom)
               in (cc, acc, ss)
-            | L.Distinct (false, [rr; nrr]), NCS (Th_bitv, _) ->
+            | L.Distinct (false, [rr; nrr]), _ when Stdlib.(X.type_info rr = Ty.Tbitv 1) ->
               (* We don't support [distinct] in general yet, but we must
                  support it for case splits to avoid looping.
 
                  Note that for 1-bit vectors (i.e. booleans), we have `x <> y`
                  iff `x = not y`. *)
-              assert Stdlib.(X.type_info rr = Ty.Tbitv 1);
               let drr = abstract_bitlist (Shostak.Bitv.embed rr) Ex.empty in
               let dnrr = abstract_bitlist (Shostak.Bitv.embed nrr) Ex.empty in
               let dom = Domains.update Ex.empty rr dom drr in

@@ -55,7 +55,7 @@ module type S = sig
      decreasing order with respect to (dlvl, plvl) *)
   val assume :
     ?ordered:bool ->
-    (BLit.t * Explanation.t * int * int) list -> t ->
+    (BLit.t * Th_util.lit_origin * Explanation.t * int * int) list -> t ->
     t * Expr.Set.t * int
 
   val optimize : t -> is_max:bool -> Expr.t -> t
@@ -65,7 +65,7 @@ module type S = sig
   val get_real_env : t -> Ccx.Main.t
   val get_case_split_env : t -> Ccx.Main.t
   val do_case_split : t -> Util.case_split_policy -> t * Expr.Set.t
-
+  val theory_decide : t -> Th_util.case_split list * t
   val add_term : t -> Expr.t -> add_in_cs:bool -> t
   val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t
 
@@ -353,7 +353,8 @@ module Main_Default : S = struct
   type t = {
     assumed_set : E.Set.t;
     assumed : (BLit.t * int * int) list list;
-    cs_pending_facts : (BLit.t * Ex.t * int * int) list list;
+    cs_pending_facts :
+      (BLit.t * Th_util.lit_origin * Ex.t * int * int) list list;
     terms : Expr.Set.t;
     gamma : CC_X.t;
     gamma_finite : CC_X.t;
@@ -686,8 +687,8 @@ module Main_Default : S = struct
     let facts = CC_X.empty_facts () in
     List.iter
       (List.iter
-         (fun (a,ex,_dlvl,_plvl) ->
-            CC_X.add_fact facts (literal_of_blit a, ex, Th_util.Other))
+         (fun (a, o, ex,_dlvl,_plvl) ->
+            CC_X.add_fact facts (literal_of_blit a, ex, o))
       ) in_facts_l;
 
     let t, ch = try_it t facts ~for_model in
@@ -702,16 +703,20 @@ module Main_Default : S = struct
     else
       t, SE.empty
 
+  let theory_decide env =
+    let splits, gamma = CC_X.case_split env.gamma ~for_model:false in
+    splits, { env with gamma }
+
   (* facts are sorted in decreasing order with respect to (dlvl, plvl) *)
   let assume ordered in_facts t =
     let facts = CC_X.empty_facts () in
     let assumed, assumed_set, cpt =
       List.fold_left
-        (fun ((assumed, assumed_set, cpt) as accu) ((a, ex, dlvl, plvl)) ->
+        (fun ((assumed, assumed_set, cpt) as accu) ((a, o, ex, dlvl, plvl)) ->
            match a with
            | BLit.Lterm a when E.Set.mem a assumed_set -> accu
            | _ ->
-             CC_X.add_fact facts (literal_of_blit a, ex, Th_util.Other);
+             CC_X.add_fact facts (literal_of_blit a, ex, o);
              let assumed_set =
                match a with
                | Lterm a -> E.Set.add a assumed_set
@@ -858,7 +863,7 @@ module Main_Default : S = struct
       }
     in
     let a = E.mk_distinct ~iff:false [E.vrai; E.faux] in
-    let t, _, _ = assume true [Lterm a, Ex.empty, 0, -1] t in
+    let t, _, _ = assume true [Lterm a, Th_util.Other, Ex.empty, 0, -1] t in
     t
 
   let cl_extract env = CC_X.cl_extract env.gamma
@@ -890,7 +895,7 @@ module Main_Default : S = struct
   let extract_ground_terms env = env.terms
 
   let get_real_env t = t.gamma
-  let get_case_split_env t = t.gamma_finite
+  let get_case_split_env t = t.gamma
 
   let compute_concrete_model env =
     let { gamma_finite; assumed_set; objectives; _ }, _ =
@@ -937,7 +942,7 @@ module Main_Empty : S = struct
   let assume ?ordered:(_=true) in_facts t =
     let assumed_set =
       List.fold_left
-        (fun assumed_set ((a, _, _, _)) ->
+        (fun assumed_set ((a, _, _, _, _)) ->
            match a with
            | BLit.Lterm a -> E.Set.add a assumed_set
            | Lsem _ -> assumed_set
@@ -953,6 +958,7 @@ module Main_Empty : S = struct
   let get_real_env _ = CC_X.empty
   let get_case_split_env _ = CC_X.empty
   let do_case_split env _ = env, E.Set.empty
+  let theory_decide env = [], env
   let add_term env _ ~add_in_cs:_ = env
   let compute_concrete_model _env = lazy Models.empty, Objective.Model.empty
 

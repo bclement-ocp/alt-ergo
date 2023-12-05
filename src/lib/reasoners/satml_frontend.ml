@@ -80,9 +80,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     guards
 
   let empty ?(selector=fun _ -> true) () =
+    let ff_hcons_env = FF.empty_hcons_env () in
     { gamma = ME.empty;
-      satml = SAT.empty ();
-      ff_hcons_env = FF.empty_hcons_env ();
+      satml = SAT.create (FF.atom_hcons_env ff_hcons_env);
+      ff_hcons_env ;
       nb_mrounds = 0;
       last_forced_normal = 0;
       last_forced_greedy = 0;
@@ -606,7 +607,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         (fun f _ sa ->
            Debug.atoms_from_sat_branch f;
            match atoms_from_sat_branch f with
-           | None   -> assert false
+           | None   ->
+             (* TODO: Why can this happen now? *)
+             sa
            | Some l -> List.fold_left (fun sa a -> SE.add a sa) sa l
         ) env.conj SE.empty
 
@@ -632,10 +635,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         if frugal then sa
         else add_reasons_graph (SA.elements sa) SA.empty
       in
-      let elit a =
-        match Atom.literal a with Lterm a -> a | Lsem _ -> assert false
+      let add_elit a s =
+        match Atom.literal a with Lterm a -> SE.add a s | Lsem _ -> s
       in
-      SA.fold (fun a s -> SE.add (elit a) s) sa SE.empty
+      SA.fold add_elit sa SE.empty
 
   let atoms_from_lazy_greedy env =
     let aux accu ff =

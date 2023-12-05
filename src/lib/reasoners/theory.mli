@@ -38,8 +38,8 @@ module type S = sig
      decreasing order with respect to (dlvl, plvl) *)
   val assume :
     ?ordered:bool ->
-    (Satml_types.BLit.t * Explanation.t * int * int) list -> t ->
-    t * Expr.Set.t * int
+    (Satml_types.BLit.t * Th_util.lit_origin * Explanation.t * int * int) list
+    -> t -> t * Expr.Set.t * int
 
   val optimize : t -> is_max:bool -> Expr.t -> t
   (** [optimize env ~is_max e] registers the expression [e] to be optimized
@@ -51,7 +51,7 @@ module type S = sig
   val get_real_env : t -> Ccx.Main.t
   val get_case_split_env : t -> Ccx.Main.t
   val do_case_split : t -> Util.case_split_policy -> t * Expr.Set.t
-
+  val theory_decide : t -> Th_util.case_split list * t
   val add_term : t -> Expr.t -> add_in_cs:bool -> t
 
   val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t

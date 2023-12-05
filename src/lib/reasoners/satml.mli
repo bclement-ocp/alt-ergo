@@ -73,7 +73,7 @@ module type SAT_ML = sig
     t -> Satml_types.Flat_Formula.hcons_env -> Satml_types.Atom.Set.t
   val current_tbox : t -> th
   val set_current_tbox : t -> th -> unit
-  val empty : unit -> t
+  val create : Atom.hcons_env -> t
 
   val assume_th_elt : t -> Expr.th_elt -> Explanation.t -> unit
   val decision_level : t -> int

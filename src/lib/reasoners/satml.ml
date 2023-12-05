@@ -114,7 +114,7 @@ module type SAT_ML = sig
     t -> FF.hcons_env -> Satml_types.Atom.Set.t
   val current_tbox : t -> th
   val set_current_tbox : t -> th -> unit
-  val empty : unit -> t
+  val create : Atom.hcons_env -> t
 
   val assume_th_elt : t -> Expr.th_elt -> Explanation.t -> unit
   val decision_level : t -> int
@@ -159,9 +159,19 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   module Matoms = Atom.Map
 
+  type split = { atom : Atom.atom ; is_cs : bool ; origin : Th_util.lit_origin }
+
+  let dummy_split =
+    { atom = Atom.dummy_atom ; is_cs = true ; origin = Th_util.Other }
+
+  let is_split (a : Atom.atom) =
+    match a.lit with Lsem _ -> true | Lterm _ -> false
+
   type th = Th.t
   type t =
     {
+      hcons_env : Atom.hcons_env;
+
       (* si vrai, les contraintes sont deja fausses *)
       mutable is_unsat : bool;
 
@@ -183,7 +193,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       mutable vars : Atom.var Vec.t;
 
       (* la pile de decisions avec les faits impliques *)
-      mutable trail : Atom.atom Vec.t;
+      mutable trail : (Atom.atom * Th_util.lit_origin) Vec.t;
+
+      mutable nassign: int;
+      (** Number of assignments. This might be less than the size of the trail,
+          because case splits (and, more importantly, *negated* case splits) are
+          not counted as assignments.
+
+          This is used as a termination criterion. *)
+
+      nassign_queue : int Vec.t;
+      (** Stack of [nassign]values at each decision levels (see [nassign] for
+          details). *)
 
       (* une pile qui pointe vers les niveaux de decision dans trail *)
       mutable trail_lim : int Vec.t;
@@ -259,7 +280,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       mutable tenv_queue : Th.t Vec.t;
 
-      mutable tatoms_queue : Atom.atom Queue.t;
+      mutable tatoms_queue : (Atom.atom * Th_util.lit_origin) Queue.t;
       (** Queue of atoms that have been added to the [trail] through either
           decision or boolean propagation, but have not been otherwise processed
           yet (in particular, they have not been propagated to the theory).
@@ -272,7 +293,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           [relevancy_propagation]); instead, the [th_tableaux] field is used to
           dictate theory propagations. *)
 
-      mutable th_tableaux : Atom.atom Queue.t;
+      mutable th_tableaux : (Atom.atom * Th_util.lit_origin) Queue.t;
       (** Queue of atoms to propagate to the theory when using CDCL-Tableaux
           with the [get_cdcl_tableaux_th ()] option.
 
@@ -386,13 +407,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       mutable increm_guards : Atom.atom Vec.t;
 
       mutable next_dec_guard : int;
+
+      mutable pending_splits: split list;
+      pending_splits_queue: split list Vec.t;
     }
 
   exception Conflict of Atom.clause
   (*module Make (Dummy : sig end) = struct*)
 
-  let empty () =
+  let create hcons_env =
     {
+      hcons_env;
+
       is_unsat = false;
 
       unsat_core = None;
@@ -410,7 +436,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       vars = Vec.make 0 ~dummy:Atom.dummy_var;
       (*sera mis a jour lors du parsing*)
 
-      trail = Vec.make 601 ~dummy:Atom.dummy_atom;
+      trail = Vec.make 601 ~dummy:(Atom.dummy_atom, Th_util.Other);
+
+      nassign = 0;
+
+      nassign_queue = Vec.make 601 ~dummy:(-1);
 
       trail_lim = Vec.make 601 ~dummy:(-105);
 
@@ -490,6 +520,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       increm_guards = Vec.make 1 ~dummy:Atom.dummy_atom;
 
       next_dec_guard = 0;
+
+      pending_splits = [];
+
+      (* Note: we can't use [] as a dummy because [] must be a valid value in
+         the vector. *)
+      pending_splits_queue = Vec.make 100 ~dummy:[dummy_split];
     }
 
   let insert_var_order env (v : Atom.var) =
@@ -524,7 +560,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   let decision_level env = Vec.size env.trail_lim
 
-  let nb_assigns env = Vec.size env.trail
+  let nb_assigns env = env.nassign
   let nb_clauses env = Vec.size env.clauses
   (* unused -- let nb_learnts env = Vec.size env.learnts *)
   let nb_vars    env = Vec.size env.vars
@@ -532,9 +568,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let new_decision_level env =
     env.decisions <- env.decisions + 1;
     Vec.push env.trail_lim (Vec.size env.trail);
+    Vec.push env.nassign_queue env.nassign;
     if Options.get_profiling() then
       Profiling.decision (decision_level env) "<none>";
     Vec.push env.tenv_queue env.tenv; (* save the current tenv *)
+    Vec.push env.pending_splits_queue env.pending_splits;
     if Options.get_cdcl_tableaux () then begin
       Vec.push env.lazy_cnf_queue env.lazy_cnf;
       Vec.push env.relevants_queue env.relevants
@@ -579,7 +617,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     a.var.reason <- None;
     a.var.vpremise <- []
 
-  let enqueue_assigned env (a : Atom.atom) =
+  let enqueue_assigned env ((a : Atom.atom), origin) =
     if Options.get_debug_sat () then
       Printer.print_dbg "[satml] enqueue_assigned: %a@." Atom.pr_atom a;
     if a.neg.is_guard then begin
@@ -597,7 +635,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       a.neg.timp <- -1
     end;
     assert (a.var.level >= 0);
-    Vec.push env.trail a
+    if not (is_split a) then env.nassign <- env.nassign + 1;
+    Vec.push env.trail (a, origin)
 
   let cancel_ff_lvls_until env lvl =
     for i = decision_level env downto lvl + 1 do
@@ -618,29 +657,34 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     if decision_level env > lvl then begin
       env.qhead <- Vec.get env.trail_lim lvl;
       for c = Vec.size env.trail - 1 downto env.qhead do
-        let a = Vec.get env.trail c in
+        let a, origin = Vec.get env.trail c in
         if Options.get_minimal_bj () && a.var.level <= lvl then begin
           assert (a.var.level = 0 || a.var.reason != None);
-          repush := a :: !repush
+          repush := (a, origin) :: !repush
         end
         else begin
           unassign_atom a;
           if a.is_guard then
             env.next_dec_guard <- env.next_dec_guard - 1;
-          (* TODO: do not add back if it is a split *)
-          insert_var_order env a.var
+          if not (is_split a) then
+            insert_var_order env a.var
         end
       done;
       Queue.clear env.tatoms_queue;
       Queue.clear env.th_tableaux;
+      env.nassign <- Vec.get env.nassign_queue lvl;
       env.tenv <- Vec.get env.tenv_queue lvl; (* recover the right tenv *)
+      env.pending_splits <- Vec.get env.pending_splits_queue lvl;
       if Options.get_cdcl_tableaux () then begin
         env.lazy_cnf <- Vec.get env.lazy_cnf_queue lvl;
         env.relevants <- Vec.get env.relevants_queue lvl;
       end;
       Vec.shrink env.trail ((Vec.size env.trail) - env.qhead);
       Vec.shrink env.trail_lim ((Vec.size env.trail_lim) - lvl);
+      Vec.shrink env.nassign_queue ((Vec.size env.nassign_queue) - lvl);
       Vec.shrink env.tenv_queue ((Vec.size env.tenv_queue) - lvl);
+      Vec.shrink env.pending_splits_queue
+        ((Vec.size env.pending_splits_queue) - lvl);
       if Options.get_cdcl_tableaux () then begin
         Vec.shrink
           env.lazy_cnf_queue ((Vec.size env.lazy_cnf_queue) - lvl);
@@ -657,6 +701,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     end;
     if Options.get_profiling() then Profiling.reset_dlevel (decision_level env);
     assert (Vec.size env.trail_lim = Vec.size env.tenv_queue);
+    assert (Vec.size env.trail_lim = Vec.size env.pending_splits_queue);
     assert (Options.get_minimal_bj () || (!repush == []));
     List.iter (enqueue_assigned env) !repush
 
@@ -669,17 +714,26 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     end
     else v
 
+  type decision = Atom of Atom.atom | Split of split
+
   let pick_branch_lit env =
     if env.next_dec_guard < Vec.size env.increm_guards then
       begin
         let a = Vec.get env.increm_guards env.next_dec_guard in
         (assert (not (a.neg.is_guard || a.neg.is_true)));
         env.next_dec_guard <- env.next_dec_guard + 1;
-        a
+        Atom a
       end
     else
-      let v = pick_branch_var env in
-      v.na
+      match env.pending_splits with
+      | split :: splits ->
+        env.pending_splits <- splits;
+        Split split
+      | [] ->
+        match pick_branch_var env with
+        | v -> Atom v.na
+        | exception Sat ->
+          raise Sat
 
 
   let debug_enqueue_level a lvl reason =
@@ -699,7 +753,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         max_lvl := max !max_lvl a.var.level) c.atoms;
     !max_lvl
 
-  let enqueue env (a : Atom.atom) lvl reason =
+  let enqueue ?(origin = Th_util.Other) env (a : Atom.atom) lvl reason =
     assert (not a.is_true && not a.neg.is_true &&
             a.var.level < 0 && a.var.reason == None && lvl >= 0);
     if a.neg.is_guard then begin
@@ -718,7 +772,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     a.var.reason <- reason;
     if Options.get_debug_sat () then
       Printer.print_dbg "[satml] enqueue: %a@." Atom.pr_atom a;
-    Vec.push env.trail a;
+    if not (is_split a) then env.nassign <- env.nassign + 1;
+    Vec.push env.trail (a, origin);
     a.var.index <- Vec.size env.trail;
     if Options.get_enable_assertions() then  debug_enqueue_level a lvl reason
 
@@ -869,7 +924,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           env.relevants <- SFF.add f_a env.relevants;
           match view f_a with
           | UNIT a ->
-            Queue.push a env.th_tableaux;
+            Queue.push (a, Th_util.Other) env.th_tableaux;
             ma
 
           | AND l ->
@@ -898,30 +953,37 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       asserted), or otherwise perform one step of CNF unfolding and add the
       formula that [a] was a proxy for to the [lazy_cnf] (see
       [add_form_to_lazy_cnf]). *)
-  let relevancy_propagation env ma a =
-    try
-      let parents, f_a = Matoms.find a ma in
-      let ma = Matoms.remove a ma in
-      let ma =
-        MFF.fold
-          (fun fp lp ma ->
-             List.fold_left
-               (fun ma bf ->
-                  let b = get_atom_or_proxy bf env.proxies in
-                  if Atom.eq_atom a b then ma
-                  else
-                    let mf_b, fb =
-                      try Matoms.find b ma with Not_found -> assert false in
-                    assert (FF.equal bf fb);
-                    let mf_b = MFF.remove fp mf_b in
-                    if MFF.is_empty mf_b then Matoms.remove b ma
-                    else Matoms.add b (mf_b, fb) ma
-               )ma lp
-          )parents ma
-      in
-      assert (let a = get_atom_or_proxy f_a env.proxies in a.is_true);
-      add_form_to_lazy_cnf env ma f_a
-    with Not_found -> ma
+  let relevancy_propagation env ma (a, origin) =
+    match Atom.literal a with
+    | Lsem _ ->
+      (* Always propagate back semantic literals to the theory. *)
+      Queue.push (a, origin) env.th_tableaux;
+      ma
+
+    | Lterm _ ->
+      try
+        let parents, f_a = Matoms.find a ma in
+        let ma = Matoms.remove a ma in
+        let ma =
+          MFF.fold
+            (fun fp lp ma ->
+               List.fold_left
+                 (fun ma bf ->
+                    let b = get_atom_or_proxy bf env.proxies in
+                    if Atom.eq_atom a b then ma
+                    else
+                      let mf_b, fb =
+                        try Matoms.find b ma with Not_found -> assert false in
+                      assert (FF.equal bf fb);
+                      let mf_b = MFF.remove fp mf_b in
+                      if MFF.is_empty mf_b then Matoms.remove b ma
+                      else Matoms.add b (mf_b, fb) ma
+                 )ma lp
+            )parents ma
+        in
+        assert (let a = get_atom_or_proxy f_a env.proxies in a.is_true);
+        add_form_to_lazy_cnf env ma f_a
+      with Not_found -> ma
 
 
   (* Note: although this seems to only update [env.lazy_cnf], the call to
@@ -952,16 +1014,16 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
        "expensive_theory_propagate => Inconsistent@."; *)
   (*   Some dep *)
 
-  let unit_theory_propagate env _full_q lazy_q =
+  let unit_theory_propagate env lazy_q =
     let nb_f = ref 0 in
     let facts =
       Queue.fold
-        (fun acc (ta : Atom.atom) ->
+        (fun acc ((ta : Atom.atom), o) ->
            assert (ta.is_true);
            assert (ta.var.level >= 0);
            if ta.var.level = 0 then begin
              incr nb_f;
-             (ta.lit, Ex.empty, 0, env.cpt_current_propagations) :: acc
+             (ta.lit, o, Ex.empty, 0, env.cpt_current_propagations) :: acc
            end
            else acc
         )[] lazy_q
@@ -987,6 +1049,17 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         if Options.get_profiling() then Profiling.theory_conflict();
         C_theory dep
 
+  let theory_split env (aview, is_cs, origin) =
+    let atom, _ =
+      Atom.add_lit_atom env.hcons_env (Lsem (Shostak.Literal.make aview)) []
+    in
+    if atom.is_true || atom.neg.is_true then (
+      None
+    ) else (
+      Format.printf "S: %a@." Atom.pr_atom atom;
+      Some { atom ; is_cs ; origin }
+    )
+
   let theory_propagate env =
     let facts = ref [] in
     let dlvl = decision_level env in
@@ -998,13 +1071,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       end
       else env.tatoms_queue
     in
-    match unit_theory_propagate env env.tatoms_queue tatoms_queue with
+    match unit_theory_propagate env tatoms_queue with
     | C_theory _ as res -> res
     | C_bool _ -> assert false
     | C_none ->
       let nb_f = ref 0 in
       while not (Queue.is_empty tatoms_queue) do
-        let a = Queue.pop tatoms_queue in
+        let a, origin = Queue.pop tatoms_queue in
         incr nb_f;
         let ta =
           if a.is_true then a
@@ -1035,7 +1108,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             ta.timp = 1
         in
         if not th_imp then
-          facts := (ta.lit, ex, dlvl,env.cpt_current_propagations) :: !facts;
+          facts :=
+            (ta.lit, origin, ex, dlvl, env.cpt_current_propagations) :: !facts;
         env.cpt_current_propagations <- env.cpt_current_propagations + 1
       done;
       if Options.get_debug_sat () then
@@ -1053,7 +1127,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          do_case_split env Util.AfterTheoryAssume
+          if Lists.is_empty env.pending_splits then (
+            let pending_splits, tenv = Th.theory_decide t in
+            env.tenv <- tenv;
+            env.pending_splits <-
+              List.filter_map (theory_split env) pending_splits;
+          );
+          C_none (* do_case_split env AfterTheoryAssume *)
         (*if full_model then expensive_theory_propagate ()
           else None*)
         with Ex.Inconsistent (dep, _terms) ->
@@ -1068,13 +1148,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     let res = ref C_none in
     (*assert (Queue.is_empty env.tqueue);*)
     while env.qhead < Vec.size env.trail do
-      let a = Vec.get env.trail env.qhead in
+      let a, origin = Vec.get env.trail env.qhead in
       if Options.get_debug_sat () then
         Printer.print_dbg "[satml] propagate atom %a@." Atom.pr_atom a;
       env.qhead <- env.qhead + 1;
       incr num_props;
       propagate_atom env a res;
-      Queue.push a env.tatoms_queue;
+      Queue.push (a, origin) env.tatoms_queue;
     done;
     env.propagations <- env.propagations + !num_props;
     env.simpDB_props <- env.simpDB_props - !num_props;
@@ -1331,10 +1411,17 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         let lclause =
           Atom.make_clause name learnt vraie_form true history
         in
-        (* TODO: do not learn if it involves splits *)
-        Vec.push env.learnts lclause;
-        attach_clause env lclause;
-        clause_bump_activity env lclause;
+        let has_splits =
+          try
+            Vec.iter (fun a -> if is_split a then raise Exit) lclause.atoms;
+            false
+          with Exit -> true
+        in
+        if not has_splits then (
+          Vec.push env.learnts lclause;
+          attach_clause env lclause;
+          clause_bump_activity env lclause;
+        );
         let propag_lvl = best_propagation_level env lclause in
         enqueue env fuip propag_lvl (Some lclause)
     end;
@@ -1370,13 +1457,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         ) !c.atoms;
 
       while assert (!tr_ind >= 0);
-        let v = (Vec.get env.trail !tr_ind).var in
+        let v = (fst (Vec.get env.trail !tr_ind)).var in
         not v.seen || ((Options.get_minimal_bj ()) && v.level < max_lvl) do
         decr tr_ind
       done;
 
       decr pathC;
-      let p = Vec.get env.trail !tr_ind in
+      let p, _ = Vec.get env.trail !tr_ind in
       decr tr_ind;
       match !pathC,p.var.reason with
       | 0, _ ->
@@ -1595,15 +1682,32 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
+  let rec pick_and_split env =
+    match pick_branch_lit env with
+    | Split { atom; is_cs = false; _ } ->
+      enqueue env atom (decision_level env) None;
+      pick_and_split env
+    | Split { atom; is_cs = true; origin = _ } ->
+      if atom.var.level < 0 then
+        atom
+      else (
+        (* Already assigned *)
+        assert (atom.is_true || atom.neg.is_true);
+        pick_and_split env
+      )
+    | Atom atom -> atom
+
   let search env strat n_of_conflicts n_of_learnts =
     let conflictC = ref 0 in
     env.starts <- env.starts + 1;
     while true do
       propagate_and_stabilize env all_propagations conflictC !strat;
 
-      if nb_assigns env = nb_vars env ||
-         (Options.get_cdcl_tableaux_inst () &&
-          Matoms.is_empty env.lazy_cnf) then
+      if Lists.is_empty env.pending_splits && (
+          nb_assigns env = nb_vars env ||
+          (Options.get_cdcl_tableaux_inst () &&
+           Matoms.is_empty env.lazy_cnf)
+        ) then
         raise Sat;
       if Options.get_enable_restarts ()
       && n_of_conflicts >= 0 && !conflictC >= n_of_conflicts then begin
@@ -1619,7 +1723,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       let next =
         match !strat with
-        | Auto -> pick_branch_lit env
+        | Auto -> pick_and_split env
         | Stop -> raise Stopped
         | Interactive f ->
           strat := Stop; f
@@ -1819,7 +1923,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                        if minimal-bj is ON"]
           ) (unit_cnf, nunit_cnf) new_v
       in
-      assert (nbv = Vec.size env.vars);
+      (* TODO assert (nbv = Vec.size env.vars); *)
       accu
 
   let set_new_proxies env proxies =
@@ -1884,7 +1988,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     not (Options.get_cdcl_tableaux ()) ||
     MFF.mem f' env.ff_lvl
 
-  let boolean_model env = Vec.to_list env.trail
+  let boolean_model env = Vec.to_list env.trail |> List.map fst
 
   let instantiation_context env hcons =
     if Options.get_cdcl_tableaux_th () then

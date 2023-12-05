@@ -176,6 +176,7 @@ module type ATOM = sig
   val hash_atom  : atom -> int
   val tag_atom   : atom -> int
 
+  val add_lit_atom : hcons_env -> BLit.t -> var list -> atom * var list
   val add_atom : hcons_env -> E.t -> var list -> atom * var list
 
   module Set : Set.S with type elt = atom
@@ -351,7 +352,7 @@ module Atom : ATOM = struct
 
   let make_var =
     fun hcons lit acc ->
-    let lit, negated = BLit.normal_form (Lterm lit) in
+    let lit, negated = BLit.normal_form lit in
     try HT.find hcons.tbl lit, negated, acc
     with Not_found ->
       let cpt = !(hcons.cpt) in
@@ -390,9 +391,11 @@ module Atom : ATOM = struct
       incr hcons.cpt;
       var, negated, var :: acc
 
-  let add_atom hcons lit acc =
+  let add_lit_atom hcons lit acc =
     let var, negated, acc = make_var hcons lit acc in
     (if negated then var.na else var.pa), acc
+
+  let add_atom hcons lit acc = add_lit_atom hcons (Lterm lit) acc
 
   (* with this code, all envs created with empty_hcons_env () will be
      initialized with the good reference to "vrai" *)
@@ -509,6 +512,7 @@ module type FLAT_FORMULA = sig
   val empty_hcons_env : unit -> hcons_env
   val nb_made_vars : hcons_env -> int
   val get_atom : hcons_env -> E.t -> Atom.atom
+  val atom_hcons_env : hcons_env -> Atom.hcons_env
 
   val simplify :
     hcons_env ->
@@ -692,6 +696,8 @@ module Flat_Formula : FLAT_FORMULA = struct
     f_empty_hcons, vrai
 
   let faux = mk_not vrai
+
+  let atom_hcons_env { atoms; _ } = atoms
 
   let nb_made_vars hcons = Atom.nb_made_vars hcons.atoms
 
