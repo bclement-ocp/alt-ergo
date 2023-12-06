@@ -257,137 +257,200 @@ module Constraint : sig
   val bvnot : ex:Ex.t -> X.r -> X.r -> t
   (** [bvnot ~ex x y] is the constraint [x = not y] *)
 end = struct
-  type repr =
-    | Band of X.r * X.r * X.r
-    (** [Band (x, y, z)] represents [x = y & z] *)
-    | Bor of X.r * X.r * X.r
-    (** [Bor (x, y, z)] represents [x = y | z] *)
-    | Bxor of SX.t
-    (** [Bxor {x1, ..., xn}] represents [x1 ^ ... ^ xn = 0] *)
-    | Bnot of X.r * X.r
-    (** [Bnot (x, y)] represents [x = not y] *)
 
-  let normalize_repr = function
-    | Band (x, y, z) when X.hash_cmp y z > 0 -> Band (x, z, y)
-    | Bor (x, y, z) when X.hash_cmp y z > 0 -> Bor (x, z, y)
-    | repr -> repr
+  (* assumes xs is sorted; remove duplicates ([x, x] -> [x])*)
+  let uniq equal xs =
+    let x = ref xs.(0) in
+    let size = ref (Array.length xs) in
+    for i = 1 to Array.length xs - 1 do
+      let y = xs.(i) in
+      if equal !x y then decr size;
+      x := y
+    done;
+    if !size = Array.length xs then xs else
+      let ys = Array.make !size !x in
+      x := xs.(0);
+      ys.(0) <- !x;
+      let j = ref 1 in
+      for i = 1 to Array.length xs - 1 do
+        let y = xs.(i) in
+        if not (equal !x y) then (
+          ys.(!j) <- y;
+          incr j
+        );
+        x := y
+      done;
+      assert (!j = !size);
+      ys
+
+  (* assumes xs is sorted; cancel duplicates ([x, x] -> [])*)
+  let cancel equal xs =
+    let prev = ref None in
+    let size = ref (Array.length xs) in
+    for i = 0 to Array.length xs - 1 do
+      match !prev with
+      | None -> prev := Some xs.(i)
+      | Some x ->
+        let y = xs.(i) in
+        if equal x y then (
+          size := !size - 2;
+          prev := None
+        ) else
+          prev := Some y
+    done;
+    if !size = Array.length xs then xs else
+      let ys = Array.make !size xs.(0) in
+      prev := None;
+      let j = ref 0 in
+      for i = 0 to Array.length xs - 1 do
+        match !prev with
+        | None -> prev := Some xs.(i)
+        | Some x ->
+          let y = xs.(i) in
+          if equal x y then prev := None else (
+            ys.(!j) <- x;
+            incr j;
+            prev := Some y
+          )
+      done;
+      ( match !prev with
+        | None -> ()
+        | Some x -> ys.(!j) <- x; incr j
+      );
+      assert (!j = !size);
+      ys
+
+  (* Functional operator: x = f(y_1, .., y_n) *)
+  type fop =
+    | Cand (* x = y_1 & y_2 *)
+    | Cor (* x = y_1 | y_2 *)
+    | Cid (* x = y_1 *)
+
+  let equal_fop o1 o2 =
+    match o1, o2 with
+    | Cand, Cand | Cor, Cor | Cid, Cid -> true
+    | (Cand | Cor | Cid), _ -> false
+
+  let hash_fop = function
+    | Cand -> Hashtbl.hash 0
+    | Cor -> Hashtbl.hash 1
+    | Cid -> Hashtbl.hash 2
+
+  (* Relational operator: P(x_1, ..., x_n) *)
+  type rop =
+    | Cxor (* x_1 ^ ... ^ x_n = 0 ; arity = 1 or 3 *)
+    | Cnot (* x_1 = ~x_2 *)
+    | Cfalse (* unsat *)
+
+  let equal_rop o1 o2 =
+    match o1, o2 with
+    | Cxor, Cxor | Cnot, Cnot | Cfalse, Cfalse  -> true
+    | (Cxor | Cnot | Cfalse), _ -> false
+
+  let hash_rop = function
+    | Cxor -> Hashtbl.hash 0
+    | Cnot -> Hashtbl.hash 1
+    | Cfalse -> Hashtbl.hash 2
+
+  type repr =
+    | Frepr of { fop : fop ; x : X.r ; ys : X.r array }
+    | Rrepr of { rop : rop ; xs : X.r array }
+
+  let frepr fop x ys =
+    match fop with
+    | Cid ->
+      assert (Array.length ys = 1);
+      Frepr { fop; x; ys }
+    | Cand | Cor ->
+      Array.fast_sort X.hash_cmp ys;
+      match uniq X.equal ys with
+      | [| _ |] as ys -> Frepr { fop = Cid; x; ys }
+      | ys -> Frepr { fop; x; ys }
+
+  let rrepr rop xs =
+    match rop with
+    | Cfalse ->
+      assert (Array.length xs = 0);
+      Rrepr { rop = Cfalse; xs = [| |] }
+    | Cxor ->
+      Array.fast_sort X.hash_cmp xs;
+      let xs = cancel X.equal xs in
+      Rrepr { rop ; xs }
+    | Cnot ->
+      Array.fast_sort X.hash_cmp xs;
+      match cancel X.equal xs with
+      | [| |] -> Rrepr { rop = Cfalse; xs = [| |] }
+      | xs -> Rrepr { rop ; xs }
+
+  let equal_array equal a1 a2 =
+    Array.length a1 = Array.length a2 &&
+    Array.for_all2 equal a1 a2
 
   let equal_repr r1 r2 =
     match r1, r2 with
-    | Band (x1, y1, z1), Band (x2, y2, z2)
-    | Bor (x1, y1, z1), Bor (x2, y2, z2) ->
-      X.equal x1 x2 && X.equal y1 y2 && X.equal z1 z2
-    | Bxor xs1, Bxor xs2 -> SX.equal xs1 xs2
-    | Bnot (x1, y1), Bnot (x2, y2) ->
-      (X.equal x1 x2 && X.equal y1 y2)
-    | Band _, _
-    | Bor _, _
-    | Bxor _, _
-    | Bnot _, _ -> false
+    | Frepr fr1, Frepr fr2 ->
+      equal_fop fr1.fop fr2.fop && X.equal fr1.x fr2.x &&
+      equal_array X.equal fr1.ys fr2.ys
+    | Rrepr rr1, Rrepr rr2 ->
+      equal_rop rr1.rop rr2.rop && equal_array X.equal rr1.xs rr2.xs
+    | (Frepr _ | Rrepr _), _ -> false
+
+  let hash_array (hash : _ -> int) a =
+    Array.fold_left (fun h e -> Hashtbl.hash (h, hash e))
+      (Hashtbl.hash (Array.length a)) a
 
   let hash_repr = function
-    | Band (x, y, z) -> Hashtbl.hash (0, X.hash x, X.hash y, X.hash z)
-    | Bor (x, y, z) -> Hashtbl.hash (1, X.hash x, X.hash y, X.hash z)
-    | Bxor xs ->
-      Hashtbl.hash (2, SX.fold (fun r acc -> X.hash r :: acc) xs [])
-    | Bnot (x, y) -> Hashtbl.hash (2, X.hash x, X.hash y)
-
-  type tagged_repr = { repr : repr ; mutable tag : int }
-
-  module W = Weak.Make(struct
-      type t = tagged_repr
-
-      let equal { repr = lhs; _ } { repr = rhs; _ } = equal_repr lhs rhs
-
-      let hash { repr; _ } = hash_repr repr
-    end)
-
-  let hcons =
-    let cnt = ref 0 in
-    let tbl = W.create 17 in
-    fun repr ->
-      let repr = normalize_repr repr in
-      let tagged = W.merge tbl { repr ; tag = -1 } in
-      if tagged.tag = -1 then (
-        tagged.tag <- !cnt;
-        incr cnt
-      );
-      tagged
+    | Frepr { fop; x; ys } ->
+      Hashtbl.hash (hash_fop fop, X.hash x, hash_array X.hash ys)
+    | Rrepr { rop; xs } ->
+      Hashtbl.hash (hash_rop rop, hash_array X.hash xs)
 
   let pp_repr ppf = function
-    | Band (x, y, z) ->
-      Fmt.pf ppf "%a & %a = %a" X.print y X.print z X.print x
-    | Bor (x, y, z) ->
-      Fmt.pf ppf "%a | %a = %a" X.print y X.print z X.print x
-    | Bxor xs ->
-      Fmt.(iter ~sep:(any " ^@ ") SX.iter X.print |> box) ppf xs;
-      Fmt.pf ppf " = 0"
-    | Bnot (x, y) ->
-      Fmt.pf ppf "%a = ~%a" X.print x X.print y
-
-  (* TODO: for bitwise constraints (eg Band, Bor, Bxor)
-      on initialisation and also after substitution
-      we should split the domain
-  *)
+    | Frepr { fop; x; ys } -> (
+        match fop, ys with
+        | Cid, [| y |] ->
+          Fmt.pf ppf "%a = %a" X.print y X.print x
+        | Cand, [| y; z |] ->
+          Fmt.pf ppf "%a & %a = %a" X.print y X.print z X.print x
+        | Cor, [| y; z |] ->
+          Fmt.pf ppf "%a | %a = %a" X.print y X.print z X.print x
+        | (Cand | Cor | Cid), _ -> assert false
+      )
+    | Rrepr { rop; xs } -> (
+        match rop, xs with
+        | Cxor, _ ->
+          Fmt.(iter ~sep:(any " ^@ ") Array.iter X.print |> box) ppf xs;
+          Fmt.pf ppf " = 0"
+        | Cfalse, [| |] -> Fmt.pf ppf "false"
+        | Cnot, [| x; y |] ->
+          Fmt.pf ppf "%a = ~%a" X.print x X.print y
+        | (Cfalse | Cnot), _ -> assert false
+      )
 
   let subst_repr rr nrr = function
-    | Band (x, y, z) ->
-      let x = X.subst rr nrr x
-      and y = X.subst rr nrr y
-      and z = X.subst rr nrr z in
-      Band (x, y, z)
-    | Bor (x, y, z) ->
-      let x = X.subst rr nrr x
-      and y = X.subst rr nrr y
-      and z = X.subst rr nrr z in
-      Bor (x, y, z)
-    | Bxor xs ->
-      Bxor (
-        SX.fold (fun r xs ->
-            let r = X.subst rr nrr r in
-            if SX.mem r xs then SX.remove r xs else SX.add r xs
-          ) xs SX.empty
-      )
-    | Bnot (x, y) ->
-      let x = X.subst rr nrr x
-      and y = X.subst rr nrr y in
-      Bnot (x, y)
+    | Frepr { fop; x; ys } ->
+      frepr fop (X.subst rr nrr x) (Array.map (X.subst rr nrr) ys)
+    | Rrepr { rop; xs } ->
+      rrepr rop (Array.map (X.subst rr nrr) xs)
 
-  (* The explanation justifies why the constraint holds. *)
-  type t = { repr : tagged_repr ; ex : Ex.t }
-
-  let pp ppf { repr; _ } = pp_repr ppf repr.repr
-
-  let compare { repr = r1; _ } { repr = r2; _ } =
-    Int.compare r1.tag r2.tag
-
-  let subst ex rr nrr c =
-    { repr = hcons @@ subst_repr rr nrr c.repr.repr ; ex = Ex.union ex c.ex }
-
-  let fold_deps f { repr; _ } acc =
-    match repr.repr with
-    | Band (x, y, z) | Bor (x, y, z) ->
+  let fold_repr f repr acc =
+    match repr with
+    | Frepr { fop = _; x; ys } ->
       let acc = f x acc in
-      let acc = f y acc in
-      let acc = f z acc in
+      let acc = Array.fold_right f ys acc in
       acc
-    | Bxor xs -> SX.fold f xs acc
-    | Bnot (x, y) ->
-      let acc = f x acc in
-      let acc = f y acc in
-      acc
+    | Rrepr { rop = _; xs } -> Array.fold_right f xs acc
 
-  let fold_leaves f c acc =
-    fold_deps (fun r acc ->
-        List.fold_left (fun acc r -> f r acc) acc (X.leaves r)
-      ) c acc
-
-  type domain = Domains.t
-
-  let propagate { repr; ex } dom =
-    Steps.incr CP;
-    match repr.repr with
-    | Band (x, y, z) ->
+  let propagate_frepr ex fop x ys dom =
+    match fop, ys with
+    | Cid, [| y |] ->
+      let dx = Domains.get x dom
+      and dy = Domains.get y dom
+      in
+      let dom = Domains.update ex x dom dy in
+      let dom = Domains.update ex y dom dx in
+      dom
+    | Cand, [| y; z |] ->
       let dx = Domains.get x dom
       and dy = Domains.get y dom
       and dz = Domains.get z dom
@@ -406,7 +469,7 @@ end = struct
         Bitlist.(intersect (ones dx) (logor (zeroes dx) (lognot (ones dy))) ex)
       in
       dom
-    | Bor (x, y, z) ->
+    | Cor, [| y; z |] ->
       let dx = Domains.get x dom
       and dy = Domains.get y dom
       and dz = Domains.get z dom
@@ -427,11 +490,15 @@ end = struct
           )
       in
       dom
-    | Bxor xs ->
-      SX.fold (fun x dom ->
+    | (Cand | Cor | Cid), _ -> assert false
+
+  let propagate_rrepr ex rop xs dom =
+    match rop, xs with
+    | Cxor, _ ->
+      Array.fold_right (fun x dom ->
           let dx = Domains.get x dom in
           let dx' =
-            SX.fold (fun y acc ->
+            Array.fold_right (fun y acc ->
                 if X.equal x y then
                   acc
                 else
@@ -440,22 +507,71 @@ end = struct
           in
           Domains.update ex x dom dx'
         ) xs dom
-    | Bnot (x, y) ->
+    | Cfalse, [| |] -> raise (Bitlist.Inconsistent ex)
+    | Cnot, [| x; y |] ->
       let dx = Domains.get x dom and dy = Domains.get y dom in
       let dom = Domains.update ex x dom @@ Bitlist.lognot dy in
       let dom = Domains.update ex y dom @@ Bitlist.lognot dx in
       dom
+    | (Cnot | Cfalse), _ -> assert false
 
+  let propagate_repr ex repr dom =
+    Steps.incr CP;
+    match repr with
+    | Frepr { fop; x; ys } -> propagate_frepr ex fop x ys dom
+    | Rrepr { rop; xs } -> propagate_rrepr ex rop xs dom
+
+  type tagged_repr = { repr : repr ; mutable tag : int }
+
+  module W = Weak.Make(struct
+      type t = tagged_repr
+
+      let equal { repr = lhs; _ } { repr = rhs; _ } = equal_repr lhs rhs
+
+      let hash { repr; _ } = hash_repr repr
+    end)
+
+  let hcons =
+    let cnt = ref 0 in
+    let tbl = W.create 17 in
+    fun repr ->
+      let tagged = W.merge tbl { repr ; tag = -1 } in
+      if tagged.tag = -1 then (
+        tagged.tag <- !cnt;
+        incr cnt
+      );
+      tagged
+
+  (* TODO: for bitwise constraints (eg Band, Bor, Bxor)
+      on initialisation and also after substitution
+      we should split the domain
+  *)
+
+  (* The explanation justifies why the constraint holds. *)
+  type t = { repr : tagged_repr ; ex : Ex.t }
+
+  let pp ppf { repr; _ } = pp_repr ppf repr.repr
+
+  let compare { repr = r1; _ } { repr = r2; _ } =
+    Int.compare r1.tag r2.tag
+
+  let subst ex rr nrr c =
+    { repr = hcons @@ subst_repr rr nrr c.repr.repr ; ex = Ex.union ex c.ex }
+
+  let fold_leaves f c acc =
+    fold_repr (fun r acc ->
+        List.fold_left (fun acc r -> f r acc) acc (X.leaves r)
+      ) c.repr.repr acc
+
+  type domain = Domains.t
+
+  let propagate { repr; ex } dom = propagate_repr ex repr.repr dom
   let make ?(ex = Ex.empty) repr = { repr = hcons repr ; ex }
 
-  let bvand ~ex x y z = make ~ex @@ Band (x, y, z)
-  let bvor ~ex x y z = make ~ex @@ Bor (x, y, z)
-  let bvxor ~ex x y z =
-    let xs = SX.singleton x in
-    let xs = if SX.mem y xs then SX.remove y xs else SX.add y xs in
-    let xs = if SX.mem z xs then SX.remove z xs else SX.add z xs in
-    make ~ex @@ Bxor xs
-  let bvnot ~ex x y = make ~ex @@ Bnot (x, y)
+  let bvand ~ex x y z = make ~ex @@ frepr Cand x [| y; z |]
+  let bvor ~ex x y z = make ~ex @@ frepr Cor x [| y; z |]
+  let bvxor ~ex x y z = make ~ex @@ rrepr Cxor [| x; y; z |]
+  let bvnot ~ex x y = make ~ex @@ rrepr Cnot [| x; y |]
 end
 
 module Constraints = Rel_utils.Constraints_Make(Constraint)
