@@ -356,15 +356,20 @@ end = struct
     | Frepr of { fop : fop ; x : X.r ; ys : X.r array }
     | Rrepr of { rop : rop ; xs : X.r array }
 
+  (* Create an equality constraint. This is only used as an intermediate
+     constraint when we learn an equality somewhere we can't directly create a
+     literal (e.g. due to simplifications after substitution). *)
+  let ceq x ys =
+    assert (Array.length ys = 1);
+    if X.equal x ys.(0) then [] else [ Frepr { fop = Cid ; x ; ys } ]
+
   let frepr fop x ys =
     match fop with
-    | Cid ->
-      assert (Array.length ys = 1);
-      if X.equal x ys.(0) then [] else [ Frepr { fop; x; ys } ]
+    | Cid -> ceq x ys
     | Cand | Cor ->
       Array.fast_sort X.hash_cmp ys;
       match uniq X.equal ys with
-      | [| _ |] as ys -> [ Frepr { fop = Cid; x; ys } ]
+      | [| _ |] as ys -> ceq x ys
       | ys -> [ Frepr { fop; x; ys } ]
 
   let rrepr rop xs =
@@ -378,7 +383,7 @@ end = struct
         | [| x |] ->
           let sz = match X.type_info x with Tbitv n -> n | _ -> assert false in
           let zero = Shostak.Bitv.is_mine Bitv.[ { bv = Cte Z.zero ; sz } ] in
-          [ Frepr { fop = Cid; x; ys = [| zero |]} ]
+          ceq x [| zero |]
         | xs -> [ Rrepr { rop ; xs } ]
       )
     | Cnot ->
