@@ -372,10 +372,15 @@ end = struct
     | Cfalse ->
       assert (Array.length xs = 0);
       [ Rrepr { rop = Cfalse; xs = [| |] } ]
-    | Cxor ->
-      Array.fast_sort X.hash_cmp xs;
-      let xs = cancel X.equal xs in
-      [ Rrepr { rop ; xs } ]
+    | Cxor -> (
+        Array.fast_sort X.hash_cmp xs;
+        match cancel X.equal xs with
+        | [| x |] ->
+          let sz = match X.type_info x with Tbitv n -> n | _ -> assert false in
+          let zero = Shostak.Bitv.is_mine Bitv.[ { bv = Cte Z.zero ; sz } ] in
+          [ Frepr { fop = Cid; x; ys = [| zero |]} ]
+        | xs -> [ Rrepr { rop ; xs } ]
+      )
     | Cnot ->
       Array.fast_sort X.hash_cmp xs;
       match cancel X.equal xs with
@@ -819,6 +824,14 @@ let add env uf r t =
           let dom = Domains.update Ex.empty r env.domain dr in
           let bcs = extract_constraints env.constraints uf r t in
           let eqs', bcs, dom = propagate bcs dom in
+          if Options.get_debug_bitv () && not (Lists.is_empty eqs') then (
+            Printer.print_dbg
+              ~module_name:"Bitv_rel" ~function_name:"add"
+              "bitlist domain: @[%a@]" Domains.pp env.domain;
+            Printer.print_dbg
+              ~module_name:"Bitv_rel" ~function_name:"add"
+              "bitlist constraints: @[%a@]" Constraints.pp env.constraints;
+          );
           { env with constraints = bcs ; domain = dom },
           List.rev_append eqs' eqs
         with Bitlist.Inconsistent ex ->
