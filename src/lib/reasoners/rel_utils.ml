@@ -222,7 +222,7 @@ module type Constraint = sig
       meaning. You should not depend on any of its properties, other than it
       defines an (arbitrary) total order on constraint representations. *)
 
-  val subst : Explanation.t -> X.r -> X.r -> t -> t
+  val subst : Explanation.t -> X.r -> X.r -> t -> t list
   (** [subst ex p v cs] replaces all the instaces of [p] with [v] in the
       constraint.
 
@@ -267,7 +267,7 @@ module Constraints_Make(Constraint : Constraint) : sig
 
       The explanation [ex] justifies the equality [p = v]. *)
 
-  val add : t -> Constraint.t -> t
+  val add : t -> Constraint.t list -> t
   (** [add c cs] adds the constraint [c] to [cs]. *)
 
   val fold_fresh : (Constraint.t -> 'a -> 'a) -> t -> 'a -> t * 'a
@@ -335,13 +335,15 @@ end = struct
             let fresh = CS.remove cs fresh in
             let cs_set = CS.remove cs cs_set in
             let cs_map = Constraint.fold_leaves (cs_remove cs) cs cs_map in
-            let cs' = Constraint.subst ex rr nrr cs in
-            if CS.mem cs' cs_set then
-              cs_map, cs_set, fresh
-            else
-              let cs_set = CS.add cs' cs_set in
-              let cs_map = Constraint.fold_leaves (cs_add cs') cs' cs_map in
-              (cs_map, cs_set, CS.add cs' fresh)
+            let css' = Constraint.subst ex rr nrr cs in
+            List.fold_left (fun (cs_map, cs_set, fresh) cs' ->
+                if CS.mem cs' cs_set then
+                  cs_map, cs_set, fresh
+                else
+                  let cs_set = CS.add cs' cs_set in
+                  let cs_map = Constraint.fold_leaves (cs_add cs') cs' cs_map in
+                  (cs_map, cs_set, CS.add cs' fresh)
+              ) (cs_map, cs_set, fresh) css'
           ) ids (bcs.cs_map, bcs.cs_set, bcs.fresh)
       in
       assert (not (MX.mem rr cs_map));
@@ -349,13 +351,15 @@ end = struct
     | exception Not_found -> bcs
 
   let add bcs c =
-    if CS.mem c bcs.cs_set then
-      bcs
-    else
-      let cs_set = CS.add c bcs.cs_set in
-      let cs_map = Constraint.fold_leaves (cs_add c) c bcs.cs_map in
-      let fresh = CS.add c bcs.fresh in
-      { cs_set ; cs_map ; fresh }
+    List.fold_left (fun bcs c ->
+        if CS.mem c bcs.cs_set then
+          bcs
+        else
+          let cs_set = CS.add c bcs.cs_set in
+          let cs_map = Constraint.fold_leaves (cs_add c) c bcs.cs_map in
+          let fresh = CS.add c bcs.fresh in
+          { cs_set ; cs_map ; fresh }
+      ) bcs c
 
   let fold_fresh f bcs acc =
     let acc = CS.fold f bcs.fresh acc in

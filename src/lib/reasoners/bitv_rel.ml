@@ -245,16 +245,16 @@ end
 module Constraint : sig
   include Rel_utils.Constraint with type domain = Domains.t
 
-  val bvand : ex:Ex.t -> X.r -> X.r -> X.r -> t
+  val bvand : ex:Ex.t -> X.r -> X.r -> X.r -> t list
   (** [bvand ~ex x y z] is the constraint [x = y & z] *)
 
-  val bvor : ex:Ex.t -> X.r -> X.r -> X.r -> t
+  val bvor : ex:Ex.t -> X.r -> X.r -> X.r -> t list
   (** [bvor ~ex x y z] is the constraint [x = y | z] *)
 
-  val bvxor : ex:Ex.t -> X.r -> X.r -> X.r -> t
+  val bvxor : ex:Ex.t -> X.r -> X.r -> X.r -> t list
   (** [bvxor ~ex x y z] is the constraint [x ^ y ^ z = 0] *)
 
-  val bvnot : ex:Ex.t -> X.r -> X.r -> t
+  val bvnot : ex:Ex.t -> X.r -> X.r -> t list
   (** [bvnot ~ex x y] is the constraint [x = not y] *)
 end = struct
 
@@ -360,27 +360,27 @@ end = struct
     match fop with
     | Cid ->
       assert (Array.length ys = 1);
-      Frepr { fop; x; ys }
+      if X.equal x ys.(0) then [] else [ Frepr { fop; x; ys } ]
     | Cand | Cor ->
       Array.fast_sort X.hash_cmp ys;
       match uniq X.equal ys with
-      | [| _ |] as ys -> Frepr { fop = Cid; x; ys }
-      | ys -> Frepr { fop; x; ys }
+      | [| _ |] as ys -> [ Frepr { fop = Cid; x; ys } ]
+      | ys -> [ Frepr { fop; x; ys } ]
 
   let rrepr rop xs =
     match rop with
     | Cfalse ->
       assert (Array.length xs = 0);
-      Rrepr { rop = Cfalse; xs = [| |] }
+      [ Rrepr { rop = Cfalse; xs = [| |] } ]
     | Cxor ->
       Array.fast_sort X.hash_cmp xs;
       let xs = cancel X.equal xs in
-      Rrepr { rop ; xs }
+      [ Rrepr { rop ; xs } ]
     | Cnot ->
       Array.fast_sort X.hash_cmp xs;
       match cancel X.equal xs with
-      | [| |] -> Rrepr { rop = Cfalse; xs = [| |] }
-      | xs -> Rrepr { rop ; xs }
+      | [| |] -> [ Rrepr { rop = Cfalse; xs = [| |] } ]
+      | xs -> [ Rrepr { rop ; xs } ]
 
   let equal_array equal a1 a2 =
     Array.length a1 = Array.length a2 &&
@@ -555,8 +555,12 @@ end = struct
   let compare { repr = r1; _ } { repr = r2; _ } =
     Int.compare r1.tag r2.tag
 
+  let make ~ex reprs =
+    List.map (fun repr -> { repr = hcons repr ; ex }) reprs
+
   let subst ex rr nrr c =
-    { repr = hcons @@ subst_repr rr nrr c.repr.repr ; ex = Ex.union ex c.ex }
+    let ex = Ex.union ex c.ex in
+    make ~ex:(Ex.union ex c.ex) @@ subst_repr rr nrr c.repr.repr
 
   let fold_leaves f c acc =
     fold_repr (fun r acc ->
@@ -566,7 +570,6 @@ end = struct
   type domain = Domains.t
 
   let propagate { repr; ex } dom = propagate_repr ex repr.repr dom
-  let make ?(ex = Ex.empty) repr = { repr = hcons repr ; ex }
 
   let bvand ~ex x y z = make ~ex @@ frepr Cand x [| y; z |]
   let bvor ~ex x y z = make ~ex @@ frepr Cor x [| y; z |]
