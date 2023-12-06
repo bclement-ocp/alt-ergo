@@ -408,8 +408,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       mutable next_dec_guard : int;
 
-      mutable pending_splits: split list;
-      pending_splits_queue: split list Vec.t;
+      mutable pending_splits: (split list * bool);
+      pending_splits_queue: (split list * bool) Vec.t;
     }
 
   exception Conflict of Atom.clause
@@ -521,11 +521,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       next_dec_guard = 0;
 
-      pending_splits = [];
+      pending_splits = ([], false);
 
       (* Note: we can't use [] as a dummy because [] must be a valid value in
          the vector. *)
-      pending_splits_queue = Vec.make 100 ~dummy:[dummy_split];
+      pending_splits_queue = Vec.make 100 ~dummy:([dummy_split], false);
     }
 
   let insert_var_order env (v : Atom.var) =
@@ -846,8 +846,24 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     let dead_part = Vec.size watched - !new_sz_w in
     Vec.shrink watched dead_part
 
+  let theory_split env (aview, is_cs, origin) =
+    let atom, _ =
+      Atom.add_lit_atom env.hcons_env (Lsem (Shostak.Literal.make aview)) []
+    in
+    if atom.is_true || atom.neg.is_true then (
+      None
+    ) else (
+      Some { atom ; is_cs ; origin }
+    )
 
   let do_case_split env origin =
+    if Lists.is_empty (fst env.pending_splits) then (
+      let pending_splits, tenv = Th.theory_decide env.tenv in
+      let keep_splitting = not (Lists.is_empty pending_splits) in
+      env.tenv <- tenv;
+      env.pending_splits <-
+        (List.filter_map (theory_split env) pending_splits, keep_splitting);
+    );
     try
       let tenv, _terms = Th.do_case_split env.tenv origin in
       (* TODO: terms not added to matching !!! *)
@@ -1030,16 +1046,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         if Options.get_profiling() then Profiling.theory_conflict();
         C_theory dep
 
-  let theory_split env (aview, is_cs, origin) =
-    let atom, _ =
-      Atom.add_lit_atom env.hcons_env (Lsem (Shostak.Literal.make aview)) []
-    in
-    if atom.is_true || atom.neg.is_true then (
-      None
-    ) else (
-      Some { atom ; is_cs ; origin }
-    )
-
   let theory_propagate env =
     let facts = ref [] in
     let dlvl = decision_level env in
@@ -1107,11 +1113,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          if false && Lists.is_empty env.pending_splits then (
+          if Lists.is_empty (fst env.pending_splits) then (
             let pending_splits, tenv = Th.theory_decide t in
+            let keep_splitting = not (Lists.is_empty pending_splits) in
             env.tenv <- tenv;
             env.pending_splits <-
-              List.filter_map (theory_split env) pending_splits;
+              (List.filter_map (theory_split env) pending_splits, keep_splitting);
           );
           C_none (* do_case_split env AfterTheoryAssume *)
         (*if full_model then expensive_theory_propagate ()
@@ -1525,6 +1532,27 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       let c = Atom.make_clause name atoms vraie_form false c_hist in
       c.removed <- true;
       let blevel, learnt, history = conflict_analyze_aux env c max_lvl in
+      if Options.get_debug_sat () then
+        Printer.print_dbg
+          "@[<v 2>Theory cancel:@ %a@ %a@]"
+          Atom.pr_clause c
+          Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt;
+      if Options.get_debug_sat () then (
+        let decisions =
+          List.map (fun a ->
+              assert (a.Atom.var.level > 0);
+              Vec.get env.trail (Vec.get env.trail_lim (a.Atom.var.level - 1)) |> fst
+            ) atoms |> Atom.Set.of_list |> Atom.Set.to_seq |> List.of_seq
+        in
+        let learnt_splits = List.filter is_split decisions
+        and learnt_bools = List.filter (fun x -> not (is_split x)) decisions in
+        Printer.print_dbg
+          "@[<v 2>Splits:@ %a@]"
+          Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt_splits;
+        Printer.print_dbg
+          "@[<v 2>Others:@ %a@]"
+          Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt_bools;
+      );
       cancel_until env blevel;
       record_learnt_clause env ~is_T_learn:false blevel learnt history
 
@@ -1538,11 +1566,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       if !max_lvl == 0 then report_b_unsat env [c];
       match fixable_with_simple_backjump c !max_lvl !lv with
       | None  ->
-        let blevel, learnt, history = conflict_analyze_aux env c !max_lvl in
+        let blevel, learnt, history =
+          conflict_analyze_aux env c !max_lvl in
+        Printer.print_dbg
+          "@[<v 2>Unfixable bool cancel:@ %a@]"
+          Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt;
         cancel_until env blevel;
         record_learnt_clause env ~is_T_learn:false blevel learnt history
       | Some (a, blevel, propag_lvl) ->
         assert (a.neg.is_true);
+        Printer.print_dbg
+          "@[<v 2>Fixable bool cancel:@ %d@]"
+          propag_lvl;
         cancel_until env blevel;
         assert (not a.neg.is_true);
         assert (propag_lvl >= 0 && propag_lvl <= blevel);
@@ -1662,7 +1697,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
-  let pick_branch_lit env =
+  let rec pick_branch_lit env =
     if env.next_dec_guard < Vec.size env.increm_guards then
       begin
         let a = Vec.get env.increm_guards env.next_dec_guard in
@@ -1672,20 +1707,19 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       end
     else
       match env.pending_splits with
-      | split :: splits ->
-        env.pending_splits <- splits;
+      | split :: splits, ks ->
+        env.pending_splits <- splits, ks;
         Split split
-      | [] ->
-        match Th.theory_decide env.tenv with
-        | [], _ ->
-          let v = pick_branch_var env in
-          Atom v.na
-        | split :: splits, tenv ->
-          let split = theory_split env split in
-          env.tenv <- tenv;
-          env.pending_splits <-
-            List.filter_map (theory_split env) splits;
-          Split (Option.get split)
+      | [], false ->
+        let v = pick_branch_var env in
+        Atom v.na
+      | [], true ->
+        let splits, tenv = Th.theory_decide env.tenv in
+        let keep_splitting = not (Lists.is_empty splits) in
+        env.tenv <- tenv;
+        env.pending_splits <-
+          (List.filter_map (theory_split env) splits, keep_splitting);
+        pick_branch_lit env
 
   let rec pick_and_split env =
     match pick_branch_lit env with
@@ -1693,9 +1727,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       enqueue env atom (decision_level env) None;
       pick_and_split env
     | Split { atom; is_cs = true; origin = _ } ->
-      if atom.var.level < 0 then
+      if atom.var.level < 0 then (
         atom
-      else (
+      ) else (
         (* Already assigned *)
         assert (atom.is_true || atom.neg.is_true);
         pick_and_split env
@@ -1708,20 +1742,23 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     while true do
       propagate_and_stabilize env all_propagations conflictC !strat;
 
-      if Lists.is_empty env.pending_splits then (
-        let pending_splits, tenv = Th.theory_decide env.tenv in
-        env.tenv <- tenv;
-        env.pending_splits <-
-          List.filter_map (theory_split env) pending_splits;
-      );
-
-      if Lists.is_empty env.pending_splits && (
+      if Lists.is_empty (fst env.pending_splits) && (snd env.pending_splits) && (
           env.nassign = nb_vars env ||
           (Options.get_cdcl_tableaux_inst () &&
            Matoms.is_empty env.lazy_cnf)
         ) then (
-        let pending, _ = Th.theory_decide env.tenv in
-        assert (Lists.is_empty pending);
+        let pending_splits, tenv = Th.theory_decide env.tenv in
+        let ks = not (Lists.is_empty pending_splits) in
+        env.tenv <- tenv;
+        env.pending_splits <-
+          List.filter_map (theory_split env) pending_splits, ks;
+      );
+      (* TODO: for completeness need to split until finished... somehow *)
+      if Lists.is_empty (fst env.pending_splits) && (
+          env.nassign = nb_vars env ||
+          (Options.get_cdcl_tableaux_inst () &&
+           Matoms.is_empty env.lazy_cnf)
+        ) then (
         raise Sat;
       );
       if Options.get_enable_restarts ()

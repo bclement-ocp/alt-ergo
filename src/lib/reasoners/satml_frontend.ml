@@ -1131,6 +1131,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         let dec_lvl = SAT.decision_level env.satml in
         let updated = instantiation env strat dec_lvl in
         do_case_split env Util.AfterMatching;
+        (* TODO: do not stop if this splitted *)
         let updated =
           if not updated && strat != Auto then instantiation env Auto dec_lvl
           else updated

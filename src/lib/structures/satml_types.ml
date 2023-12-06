@@ -332,7 +332,7 @@ module Atom : ATOM = struct
     let atoms_vec = Vec.pp atom
 
     let clause fmt { name; atoms=arr; cpremise=cp; _ } =
-      Format.fprintf fmt "%s:{ %a} cpremise={{%a}}" name atoms_vec
+      Format.fprintf fmt "%s:@[@[{ %a@]}@ cpremise={{%a}}@]" name atoms_vec
         arr premise cp
   end
 
