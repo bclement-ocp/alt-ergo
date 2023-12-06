@@ -243,7 +243,7 @@ end = struct
 end
 
 module Constraint : sig
-  include Rel_utils.Constraint with type domain = Domains.t
+  include Rel_utils.Constraint with type domain = Domains.t * (X.r L.view * Ex.t) list
 
   val bvand : ex:Ex.t -> X.r -> X.r -> X.r -> t list
   (** [bvand ~ex x y z] is the constraint [x = y & z] *)
@@ -441,15 +441,17 @@ end = struct
       acc
     | Rrepr { rop = _; xs } -> Array.fold_right f xs acc
 
-  let propagate_frepr ex fop x ys dom =
+  let propagate_frepr ex fop x ys dom facts =
     match fop, ys with
     | Cid, [| y |] ->
+      (* Domain update is not strictly necessary but can allow more propagation
+         before the next Uf roundtrip *)
       let dx = Domains.get x dom
       and dy = Domains.get y dom
       in
       let dom = Domains.update ex x dom dy in
       let dom = Domains.update ex y dom dx in
-      dom
+      dom, (Uf.LX.mkv_eq x y, ex) :: facts
     | Cand, [| y; z |] ->
       let dx = Domains.get x dom
       and dy = Domains.get y dom
@@ -468,7 +470,7 @@ end = struct
         Domains.update ex z dom @@
         Bitlist.(intersect (ones dx) (logor (zeroes dx) (lognot (ones dy))) ex)
       in
-      dom
+      dom, facts
     | Cor, [| y; z |] ->
       let dx = Domains.get x dom
       and dy = Domains.get y dom
@@ -489,7 +491,7 @@ end = struct
             intersect (zeroes dx) (logand (ones dx) (lognot (zeroes dy))) ex
           )
       in
-      dom
+      dom, facts
     | (Cand | Cor | Cid), _ -> assert false
 
   let propagate_rrepr ex rop xs dom =
@@ -515,11 +517,11 @@ end = struct
       dom
     | (Cnot | Cfalse), _ -> assert false
 
-  let propagate_repr ex repr dom =
+  let propagate_repr ex repr (dom, facts) =
     Steps.incr CP;
     match repr with
-    | Frepr { fop; x; ys } -> propagate_frepr ex fop x ys dom
-    | Rrepr { rop; xs } -> propagate_rrepr ex rop xs dom
+    | Frepr { fop; x; ys } -> propagate_frepr ex fop x ys dom facts
+    | Rrepr { rop; xs } -> propagate_rrepr ex rop xs dom, facts
 
   type tagged_repr = { repr : repr ; mutable tag : int }
 
@@ -567,9 +569,10 @@ end = struct
         List.fold_left (fun acc r -> f r acc) acc (X.leaves r)
       ) c.repr.repr acc
 
-  type domain = Domains.t
+  type domain = Domains.t * (X.r L.view * Ex.t) list
 
-  let propagate { repr; ex } dom = propagate_repr ex repr.repr dom
+  let propagate { repr; ex } (dom, facts) =
+    propagate_repr ex repr.repr (dom, facts)
 
   let bvand ~ex x y z = make ~ex @@ frepr Cand x [| y; z |]
   let bvor ~ex x y z = make ~ex @@ frepr Cor x [| y; z |]
@@ -654,21 +657,21 @@ let add_eqs =
    - The constraints involving variables whose domain changed since the last
       propagation *)
 let propagate =
-  let rec propagate changed bcs dom =
+  let rec propagate changed bcs dom facts =
     match Domains.choose_changed dom with
     | r, dom ->
-      propagate (SX.add r changed) bcs @@
-      Constraints.propagate bcs r dom
-    | exception Not_found -> changed, dom
+      let dom, facts = Constraints.propagate bcs r (dom, facts) in
+      propagate (SX.add r changed) bcs dom facts
+    | exception Not_found -> changed, dom, facts
   in
   fun bcs dom ->
-    let bcs, dom =
-      Constraints.fold_fresh Constraint.propagate bcs dom
+    let bcs, (dom, facts) =
+      Constraints.fold_fresh Constraint.propagate bcs (dom, [])
     in
-    let changed, dom = propagate SX.empty bcs dom in
+    let changed, dom, facts = propagate SX.empty bcs dom facts in
     SX.fold (fun r acc ->
         add_eqs acc (Shostak.Bitv.embed r) (Domains.get r dom)
-      ) changed [], bcs, dom
+      ) changed facts, bcs, dom
 
 type t =
   { delayed : Rel_utils.Delayed.t
