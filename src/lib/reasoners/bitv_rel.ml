@@ -34,19 +34,6 @@ module Sy = Symbols
 module X = Shostak.Combine
 module L = Xliteral
 
-(* Currently we only compute, but in the future we may want to perform the same
-   simplifications as in [Bitv.make]. We currently don't, because we don't
-   really have a way to share code that uses polynome between the theory and the
-   relations without touching the Shostak [module rec].
-
-   Note that if we *do* want to compute here, the check for [X.is_constant] in
-   [Rel_utils.update] needs to be removed, which may have (small) performance
-   implications. *)
-let bv2nat _op bv =
-  match Bitv.to_Z_opt bv with
-  | Some n -> Some (Shostak.Polynome.create [] (Q.of_bigint n) Tint)
-  | None -> None
-
 (* [int2bv] is in the bitvector theory rather than the arithmetic theory because
    we treat the arithmetic as more "primitive" than bit-vectors. *)
 let int2bv op p =
@@ -61,9 +48,7 @@ let int2bv op p =
 let delay1 = Rel_utils.delay1
 
 let dispatch = function
-  | Symbols.BV2Nat ->
-    Some (delay1 Shostak.Bitv.embed Shostak.Arith.is_mine bv2nat)
-  | Int2BV _ ->
+  | Symbols.Int2BV _ ->
     Some (delay1 Shostak.Arith.embed Shostak.Bitv.is_mine int2bv)
   | _ -> None
 
@@ -256,6 +241,9 @@ module Constraint : sig
 
   val bvnot : ex:Ex.t -> X.r -> X.r -> t list
   (** [bvnot ~ex x y] is the constraint [x = not y] *)
+
+  val bv2nat : ex:Ex.t -> X.r -> X.r -> t list
+  (** [bv2nat ~ex x y] is the constraint [x = bv2nat(y)] *)
 end = struct
 
   (* assumes xs is sorted; remove duplicates ([x, x] -> [x])*)
@@ -325,16 +313,18 @@ end = struct
     | Cand (* x = y_1 & y_2 *)
     | Cor (* x = y_1 | y_2 *)
     | Cid (* x = y_1 *)
+    | Cbv2nat (* x = bv2nat(y) *)
 
   let equal_fop o1 o2 =
     match o1, o2 with
-    | Cand, Cand | Cor, Cor | Cid, Cid -> true
-    | (Cand | Cor | Cid), _ -> false
+    | Cand, Cand | Cor, Cor | Cid, Cid | Cbv2nat, Cbv2nat -> true
+    | (Cand | Cor | Cid | Cbv2nat), _ -> false
 
   let hash_fop = function
     | Cand -> Hashtbl.hash 0
     | Cor -> Hashtbl.hash 1
     | Cid -> Hashtbl.hash 2
+    | Cbv2nat -> Hashtbl.hash 3
 
   (* Relational operator: P(x_1, ..., x_n) *)
   type rop =
@@ -366,11 +356,58 @@ end = struct
   let frepr fop x ys =
     match fop with
     | Cid -> ceq x ys
-    | Cand | Cor ->
-      Array.fast_sort X.hash_cmp ys;
-      match uniq X.equal ys with
-      | [| _ |] as ys -> ceq x ys
-      | ys -> [ Frepr { fop; x; ys } ]
+    | Cand | Cor -> (
+        Array.fast_sort X.hash_cmp ys;
+        match uniq X.equal ys with
+        | [| _ |] as ys -> ceq x ys
+        | ys -> [ Frepr { fop; x; ys } ]
+      )
+    | Cbv2nat ->
+      assert (Array.length ys = 1);
+      let y = Shostak.Bitv.embed ys.(0) in
+      match y with
+      | [ { bv = (Other r | Ext (r, _, _, _)); _ } ] when not r.negated ->
+        [ Frepr { fop ; x ; ys } ]
+      | _ ->
+        let zero = Shostak.Polynome.create [] Q.zero Tint in
+        let x', reprs =
+          List.fold_left (fun (x', reprs) ({ Bitv.bv; sz } as y) ->
+              let two_pow = Q.of_bigint Z.(one lsl sz) in
+              let x' = Shostak.Polynome.mult_const two_pow x' in
+              match bv with
+              | Bitv.Cte n ->
+                Shostak.Polynome.add_const (Q.of_bigint n) x',
+                reprs
+              | Other r | Ext (r, _, _, _) ->
+                let ny = Shostak.Bitv.is_mine @@ Bitv.negate_abstract [ y ] in
+                let y = Shostak.Bitv.is_mine [ y ] in
+                let y, ny = if r.negated then ny, y else y, ny in
+
+                (* TODO: bv2nat(x^[?, ?]) -> k *)
+                let ak = E.fresh_name Tint in
+                assert Stdlib.(E.type_info ak = Tint);
+                let xp = X.term_embed ak |> Shostak.Arith.embed in
+                let nxp =
+                  (* 2^n - x - 1 *)
+                  Shostak.Polynome.sub
+                    (Shostak.Polynome.create [] Q.(two_pow - ~$1) Tint) xp
+                in
+
+                Shostak.Polynome.add x' (if r.negated then nxp else xp),
+                Frepr {
+                  fop;
+                  x = Shostak.Arith.is_mine nxp;
+                  ys = [| ny |]
+                } ::
+                Frepr {
+                  fop;
+                  x = Shostak.Arith.is_mine xp;
+                  ys = [| y |]
+                } :: reprs
+            ) (zero, []) y
+        in
+        ceq x [| (Shostak.Arith.is_mine x') |] @
+        reprs
 
   let rrepr rop xs =
     match rop with
@@ -420,11 +457,13 @@ end = struct
         match fop, ys with
         | Cid, [| y |] ->
           Fmt.pf ppf "%a = %a" X.print y X.print x
+        | Cbv2nat, [| y |] ->
+          Fmt.pf ppf "bv2nat(%a) = %a" X.print y X.print x
         | Cand, [| y; z |] ->
           Fmt.pf ppf "%a & %a = %a" X.print y X.print z X.print x
         | Cor, [| y; z |] ->
           Fmt.pf ppf "%a | %a = %a" X.print y X.print z X.print x
-        | (Cand | Cor | Cid), _ -> assert false
+        | (Cand | Cor | Cid | Cbv2nat), _ -> assert false
       )
     | Rrepr { rop; xs } -> (
         match rop, xs with
@@ -436,12 +475,6 @@ end = struct
           Fmt.pf ppf "%a = ~%a" X.print x X.print y
         | (Cfalse | Cnot), _ -> assert false
       )
-
-  let subst_repr rr nrr = function
-    | Frepr { fop; x; ys } ->
-      frepr fop (X.subst rr nrr x) (Array.map (X.subst rr nrr) ys)
-    | Rrepr { rop; xs } ->
-      rrepr rop (Array.map (X.subst rr nrr) xs)
 
   let fold_repr f repr acc =
     match repr with
@@ -456,12 +489,27 @@ end = struct
     | Cid, [| y |] ->
       (* Domain update is not strictly necessary but can allow more propagation
          before the next Uf roundtrip *)
-      let dx = Domains.get x dom
-      and dy = Domains.get y dom
-      in
-      let dom = Domains.update ex x dom dy in
-      let dom = Domains.update ex y dom dx in
+      (* let dx = Domains.get x dom
+         and dy = Domains.get y dom
+         in
+         let dom = Domains.update ex x dom dy in
+         let dom = Domains.update ex y dom dx in *)
       dom, (Uf.LX.mkv_eq x y, ex) :: facts
+    | Cbv2nat, [| y |] -> (
+        let dy = Domains.get y dom in
+        (* The smallest possible value sets all the unknown bits to 0.
+           The largest possible value sets all the unknown bits to 1. *)
+        let minv = Bitlist.value dy in
+        let minp = Shostak.Polynome.create [] (Q.of_bigint minv) Tint in
+        let minx = Shostak.Arith.is_mine minp in
+        let maxv = Bitlist.max_value dy in
+        let maxp = Shostak.Polynome.create [] (Q.of_bigint maxv) Tint in
+        let maxx = Shostak.Arith.is_mine maxp in
+        dom,
+        (Uf.LX.mkv_builtin true LE [ x; maxx ], ex) ::
+        (Uf.LX.mkv_builtin true LE [ minx; x ], ex) ::
+        facts
+      )
     | Cand, [| y; z |] ->
       let dx = Domains.get x dom
       and dy = Domains.get y dom
@@ -502,7 +550,7 @@ end = struct
           )
       in
       dom, facts
-    | (Cand | Cor | Cid), _ -> assert false
+    | (Cand | Cor | Cid | Cbv2nat), _ -> assert false
 
   let propagate_rrepr ex rop xs dom =
     match rop, xs with
@@ -572,7 +620,19 @@ end = struct
 
   let subst ex rr nrr c =
     let ex = Ex.union ex c.ex in
-    make ~ex:(Ex.union ex c.ex) @@ subst_repr rr nrr c.repr.repr
+    let cc =
+      match c.repr.repr with
+      | Frepr { fop; x; ys } ->
+        let x' = X.subst rr nrr x in
+        let ys' = Array.map (X.subst rr nrr) ys in
+        if X.equal x' x && Array.for_all2 X.equal ys ys' then [ c ] else
+          make ~ex @@ frepr fop x' ys'
+      | Rrepr { rop; xs } ->
+        let xs' = Array.map (X.subst rr nrr) xs in
+        if Array.for_all2 X.equal xs xs' then [ c ] else
+          make ~ex @@ rrepr rop (Array.map (X.subst rr nrr) xs)
+    in
+    cc
 
   let fold_leaves f c acc =
     fold_repr (fun r acc ->
@@ -588,6 +648,7 @@ end = struct
   let bvor ~ex x y z = make ~ex @@ frepr Cor x [| y; z |]
   let bvxor ~ex x y z = make ~ex @@ rrepr Cxor [| x; y; z |]
   let bvnot ~ex x y = make ~ex @@ rrepr Cnot [| x; y |]
+  let bv2nat ~ex x y = make ~ex @@ frepr Cbv2nat x [| y |]
 end
 
 module Constraints = Rel_utils.Constraints_Make(Constraint)
@@ -611,6 +672,9 @@ let extract_constraints bcs uf r t =
     let rx, exx = Uf.find uf x
     and ry, exy = Uf.find uf y in
     Constraints.add bcs @@ Constraint.bvxor ~ex:(Ex.union exx exy) r rx ry
+  | { f = Op BV2Nat; xs = [ x ]; _ } ->
+    let rx, exx = Uf.find uf x in
+    Constraints.add bcs @@ Constraint.bv2nat ~ex:exx r rx
   | _ -> bcs
 
 let rec mk_eq ex lhs w z =
@@ -712,8 +776,10 @@ let assume env uf la =
               | _ -> false
             in
             match a, orig with
-            | L.Eq (rr, nrr), Subst when is_bv_r rr ->
-              let dom = Domains.subst ex rr nrr dom in
+            | L.Eq (rr, nrr), Subst ->
+              let dom =
+                if is_bv_r rr then Domains.subst ex rr nrr dom else dom
+              in
               let bcs = Constraints.subst ex rr nrr bcs in
               ((bcs, dom), ss)
             | L.Distinct (false, [rr; nrr]), _ when is_1bit rr ->
@@ -738,7 +804,7 @@ let assume env uf la =
           la
       in
       let eqs, constraints, domain = propagate constraints domain in
-      if Options.get_debug_bitv () && not (Lists.is_empty eqs) then (
+      if Options.get_debug_bitv () then (
         Printer.print_dbg
           ~module_name:"Bitv_rel" ~function_name:"assume"
           "bitlist domain: @[%a@]" Domains.pp domain;
@@ -761,6 +827,7 @@ let assume env uf la =
 let query _ _ _ = None
 
 let case_split env _uf ~for_model =
+  if true then [] else
   if not for_model && Stdlib.(env.size_splits >= Options.get_max_split ()) then
     []
   else
@@ -784,13 +851,14 @@ let case_split env _uf ~for_model =
     let _, candidates =
       match
         Constraints.fold_r (fun r acc ->
-            List.fold_left (fun acc { Bitv.bv; _ } ->
-                match bv with
-                | Bitv.Cte _ -> acc
-                | Other r | Ext (r, _, _, _) ->
-                  let bl = Domains.get r.value env.domain in
-                  f_acc r.value bl acc
-              ) acc (Shostak.Bitv.embed r)
+            if not (is_bv_r r) then acc else
+              List.fold_left (fun acc { Bitv.bv; _ } ->
+                  match bv with
+                  | Bitv.Cte _ -> acc
+                  | Other r | Ext (r, _, _, _) ->
+                    let bl = Domains.get r.value env.domain in
+                    f_acc r.value bl acc
+                ) acc (Shostak.Bitv.embed r)
           ) env.constraints None
       with
       | Some (nunk, xs) -> nunk, xs
@@ -822,27 +890,28 @@ let case_split env _uf ~for_model =
 let add env uf r t =
   let delayed, eqs = Rel_utils.Delayed.add env.delayed uf r t in
   let env, eqs =
-    match X.type_info r with
-    | Tbitv n -> (
-        try
+    try
+      let bcs = extract_constraints env.constraints uf r t in
+      let dom =
+        match X.type_info r with
+        | Tbitv n ->
           let dr = Bitlist.unknown n Ex.empty in
-          let dom = Domains.update Ex.empty r env.domain dr in
-          let bcs = extract_constraints env.constraints uf r t in
-          let eqs', bcs, dom = propagate bcs dom in
-          if Options.get_debug_bitv () && not (Lists.is_empty eqs') then (
-            Printer.print_dbg
-              ~module_name:"Bitv_rel" ~function_name:"add"
-              "bitlist domain: @[%a@]" Domains.pp env.domain;
-            Printer.print_dbg
-              ~module_name:"Bitv_rel" ~function_name:"add"
-              "bitlist constraints: @[%a@]" Constraints.pp env.constraints;
-          );
-          { env with constraints = bcs ; domain = dom },
-          List.rev_append eqs' eqs
-        with Bitlist.Inconsistent ex ->
-          raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
-      )
-    | _ -> env, eqs
+          Domains.update Ex.empty r env.domain dr
+        | _ -> env.domain
+      in
+      let eqs', bcs, dom = propagate bcs dom in
+      if Options.get_debug_bitv () && not (Lists.is_empty eqs') then (
+        Printer.print_dbg
+          ~module_name:"Bitv_rel" ~function_name:"add"
+          "bitlist domain: @[%a@]" Domains.pp env.domain;
+        Printer.print_dbg
+          ~module_name:"Bitv_rel" ~function_name:"add"
+          "bitlist constraints: @[%a@]" Constraints.pp bcs
+      );
+      { env with constraints = bcs ; domain = dom },
+      List.rev_append eqs' eqs
+    with Bitlist.Inconsistent ex ->
+      raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
   in
   { env with delayed }, eqs
 

@@ -87,6 +87,9 @@ val value : t -> Z.t
     [b] is not fully known, then only the known bits (those that are set in
     [bits_known b]) are meaningful; unknown bits are set to [0]. *)
 
+val max_value : t -> Z.t
+(** [max_value b] is like [b], but the unknown bits are set to [1]. *)
+
 val intersect : t -> t -> Explanation.t -> t
 (** [intersect b1 b2 ex] returns a new bitlist [b] that subsumes both [b1] and
     [b2]. The explanation [ex] justifies that the two bitlists can be merged.

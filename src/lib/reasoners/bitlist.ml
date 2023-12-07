@@ -77,6 +77,8 @@ let num_unknown b = b.width - Z.popcount (bits_known b)
 
 let value b = b.bits_set
 
+let max_value b = Z.extract (Z.lognot b.bits_clr) 0 b.width
+
 let is_fully_known b =
   Z.(equal (shift_right (bits_known b + ~$1) b.width) ~$1)
 

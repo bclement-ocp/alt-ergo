@@ -48,6 +48,8 @@ type 'a simple_term = ('a simple_term_aux) alpha_term
 
 type 'a abstract = 'a simple_term list
 
+val negate_abstract : 'a abstract -> 'a abstract
+
 (** [extract size i j x] extracts [i..j] from a composition of size [size].
 
     An element of size [sz] at the head of the composition contains the bits
