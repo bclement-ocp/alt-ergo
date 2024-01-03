@@ -895,7 +895,7 @@ module Main_Default : S = struct
   let extract_ground_terms env = env.terms
 
   let get_real_env t = t.gamma
-  let get_case_split_env t = t.gamma
+  let get_case_split_env t = t.gamma_finite
 
   let compute_concrete_model env =
     let { gamma_finite; assumed_set; objectives; _ }, _ =

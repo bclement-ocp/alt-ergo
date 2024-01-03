@@ -61,6 +61,8 @@ module type S = sig
 
   val remove_min : t -> elt
 
+  val peek_min : t -> elt
+
   val filter : t -> (elt -> bool) -> unit
 end
 
@@ -150,6 +152,11 @@ module Make(Rank : RankedType) = struct
 
   let[@inline] grow_to_by_double { heap } sz =
     Vec.grow_to_by_double heap sz
+
+  let peek_min { heap } =
+    match Vec.size heap with
+    | 0 -> raise Not_found
+    | _ -> Vec.get heap 0
 
   let remove_min ({ heap } as s) =
     match Vec.size heap with

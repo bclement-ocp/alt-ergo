@@ -101,6 +101,9 @@ module type S = sig
 
       @raise Not_found if the heap is empty. *)
 
+  val peek_min : t -> elt
+  (** Peek at the minimum element from the heap without removing it. *)
+
   val filter : t -> (elt -> bool) -> unit
   (** Filter elements in the heap. *)
 end
