@@ -1813,14 +1813,27 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         env.pending_splits <-
           List.filter_map (theory_split env) pending_splits, ks;
       );
+
       (* TODO: for completeness need to split until finished... somehow *)
       if Lists.is_empty (fst env.pending_splits) && (
           env.nassign = nb_vars env ||
           (Options.get_cdcl_tableaux_inst () &&
            Matoms.is_empty env.lazy_cnf)
         ) then (
-        raise Sat;
+        (* TODO: if produce_model then ... *)
+        if false then (
+          let pending_splits, tenv = Th.theory_decide ~for_model:true env.tenv in
+          let ks = not (Lists.is_empty pending_splits) in
+          env.tenv <- tenv;
+          env.pending_splits <-
+            List.filter_map (theory_split env) pending_splits, ks;
+          ()
+        );
+
+        if Lists.is_empty (fst env.pending_splits) then
+          raise Sat;
       );
+
       if Options.get_enable_restarts ()
       && n_of_conflicts >= 0 && !conflictC >= n_of_conflicts then begin
         env.progress_estimate <- progress_estimate env;

@@ -51,7 +51,7 @@ module type S = sig
   val get_real_env : t -> Ccx.Main.t
   val get_case_split_env : t -> Ccx.Main.t
   val do_case_split : t -> Util.case_split_policy -> t * Expr.Set.t
-  val theory_decide : t -> Th_util.case_split list * t
+  val theory_decide : ?for_model:bool -> t -> Th_util.case_split list * t
   val add_term : t -> Expr.t -> add_in_cs:bool -> t
 
   val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t

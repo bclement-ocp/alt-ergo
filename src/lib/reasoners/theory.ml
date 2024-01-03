@@ -65,7 +65,7 @@ module type S = sig
   val get_real_env : t -> Ccx.Main.t
   val get_case_split_env : t -> Ccx.Main.t
   val do_case_split : t -> Util.case_split_policy -> t * Expr.Set.t
-  val theory_decide : t -> Th_util.case_split list * t
+  val theory_decide : ?for_model:bool -> t -> Th_util.case_split list * t
   val add_term : t -> Expr.t -> add_in_cs:bool -> t
   val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t
 
@@ -703,9 +703,50 @@ module Main_Default : S = struct
     else
       t, SE.empty
 
-  let theory_decide env =
-    let splits, gamma = CC_X.case_split env.gamma ~for_model:false in
-    splits, { env with gamma }
+  let theory_decide ?(for_model = false) env =
+    match Objective.Model.next_unknown env.objectives ~for_model with
+    | Some (obj, order) -> (
+        let opt_split =
+          Option.get (CC_X.optimizing_objective env.gamma obj)
+        in
+        let objectives =
+          Objective.Model.add obj opt_split.value env.objectives
+        in
+        let env = { env with objectives } in
+        match opt_split.value with
+        | Unknown ->
+          (* In the current implementation of optimization, the function
+             [CC_X.optimizing_objective] cannot fail to optimize the objective
+             function [obj]. First of all, the legacy parser only accepts
+             optimization clauses on expressions of type [Real] or [Int].
+             For the [Real] or [Int] expressions, we have two cases:
+             - If the objective function is a linear functions of variables, the
+               decision procedure implemented in Ocplib-simplex cannot fail to
+               optimize the split. For instance, if we try to maximize the
+               expression:
+                 5 * x + 2 * y + 3 where x and y are real variables,
+               the procedure will success to produce the upper bound of [x] and
+               [y] modulo the other constraints on it.
+             - If the objective function isn't linear, the nonlinear part of the
+               expression have seen as uninterpreted term of the arithemic theory.
+               Let's imagine we try to maximize the expression:
+                 5 * x * x + 2 * y + 3,
+               The objective function given to Ocplib-simplex looks like:
+                 5 * U + 2 * y + 3 where U = x * x
+               and the procedure will optimize the problem in terms of U and y. *)
+          assert false
+
+        | Pinfinity | Minfinity | Limit _ when not for_model ->
+          (* We stop optimizing the objective function [obj] in this case,
+             but we continue to produce a model during model generation. *)
+          [], env
+
+        | Pinfinity | Minfinity | Limit _ | Value _ ->
+          [ opt_split.case_split ], env
+      )
+    | None ->
+      let splits, gamma = CC_X.case_split env.gamma ~for_model in
+      splits, { env with gamma }
 
   (* facts are sorted in decreasing order with respect to (dlvl, plvl) *)
   let assume ordered in_facts t =
@@ -958,7 +999,7 @@ module Main_Empty : S = struct
   let get_real_env _ = CC_X.empty
   let get_case_split_env _ = CC_X.empty
   let do_case_split env _ = env, E.Set.empty
-  let theory_decide env = [], env
+  let theory_decide ?for_model:_ env = [], env
   let add_term env _ ~add_in_cs:_ = env
   let compute_concrete_model _env = lazy Models.empty, Objective.Model.empty
 
