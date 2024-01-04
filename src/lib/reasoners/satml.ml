@@ -848,15 +848,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     )
 
   let do_case_split env origin =
-    (* TODO !! *)
-    if true then C_none else
-      try
-        let tenv, _terms = Th.do_case_split env.tenv origin in
-        (* TODO: terms not added to matching !!! *)
-        env.tenv <- tenv;
-        C_none
-      with Ex.Inconsistent (expl, _) ->
-        C_theory expl
+    if Options.get_case_split_policy () == origin then
+      env.should_split <- true;
+    C_none
+  (* TODO !!
+     if true then C_none else
+     try
+      let tenv, _terms = Th.do_case_split env.tenv origin in
+      (* TODO: terms not added to matching !!! *)
+      env.tenv <- tenv;
+      C_none
+     with Ex.Inconsistent (expl, _) ->
+      C_theory expl *)
 
   module SA = Atom.Set
 
@@ -1099,9 +1102,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          if Lists.is_empty env.pending_splits then (
-            env.should_split <- true;
-          );
           do_case_split env AfterTheoryAssume
         with Ex.Inconsistent (dep, _terms) ->
           (* XXX what to do with terms ? *)
@@ -1535,7 +1535,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
           cancel_until env (max_lvl - 1);
           assert (not a.is_true && not a.neg.is_true);
-          env.next_decision <- Some a
+          env.next_decision <- Some a.neg
         | None ->
           let name = Atom.fresh_dname() in
           let c = Atom.make_clause name atoms vraie_form false c_hist in
@@ -1911,7 +1911,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       (* check_unsat_core cl; *)
       raise e
 
-  let solve = solve_aux ~for_model:false
+  let solve env =
+    solve_aux ~for_model:false env
 
   let compute_concrete_model env =
     try
