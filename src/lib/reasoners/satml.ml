@@ -163,9 +163,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   type split = { atom : Atom.atom ; is_cs : bool ; origin : Th_util.lit_origin }
 
-  let dummy_split =
-    { atom = Atom.dummy_atom ; is_cs = true ; origin = Th_util.Other }
-
   let is_split (a : Atom.atom) =
     match Shostak.Literal.view a.lit with
     | LSem _ -> true
@@ -413,7 +410,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       mutable next_dec_guard : int;
 
       mutable pending_splits: (split list * bool);
-      pending_splits_queue: (split list * bool) Vec.t;
 
       mutable next_decision : Atom.atom option ;
     }
@@ -529,10 +525,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       pending_splits = ([], false);
 
-      (* Note: we can't use [] as a dummy because [] must be a valid value in
-         the vector. *)
-      pending_splits_queue = Vec.make 100 ~dummy:([dummy_split], false);
-
       next_decision = None;
     }
 
@@ -580,7 +572,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     if Options.get_profiling() then
       Profiling.decision (decision_level env) "<none>";
     Vec.push env.tenv_queue env.tenv; (* save the current tenv *)
-    Vec.push env.pending_splits_queue env.pending_splits;
     if Options.get_cdcl_tableaux () then begin
       Vec.push env.lazy_cnf_queue env.lazy_cnf;
       Vec.push env.relevants_queue env.relevants
@@ -682,7 +673,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Queue.clear env.th_tableaux;
       env.nassign <- Vec.get env.nassign_queue lvl;
       env.tenv <- Vec.get env.tenv_queue lvl; (* recover the right tenv *)
-      env.pending_splits <- Vec.get env.pending_splits_queue lvl;
+      env.pending_splits <- [], false;
       if Options.get_cdcl_tableaux () then begin
         env.lazy_cnf <- Vec.get env.lazy_cnf_queue lvl;
         env.relevants <- Vec.get env.relevants_queue lvl;
@@ -691,8 +682,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Vec.shrink env.trail_lim ((Vec.size env.trail_lim) - lvl);
       Vec.shrink env.nassign_queue ((Vec.size env.nassign_queue) - lvl);
       Vec.shrink env.tenv_queue ((Vec.size env.tenv_queue) - lvl);
-      Vec.shrink env.pending_splits_queue
-        ((Vec.size env.pending_splits_queue) - lvl);
       if Options.get_cdcl_tableaux () then begin
         Vec.shrink
           env.lazy_cnf_queue ((Vec.size env.lazy_cnf_queue) - lvl);
@@ -709,7 +698,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     end;
     if Options.get_profiling() then Profiling.reset_dlevel (decision_level env);
     assert (Vec.size env.trail_lim = Vec.size env.tenv_queue);
-    assert (Vec.size env.trail_lim = Vec.size env.pending_splits_queue);
     assert (Options.get_minimal_bj () || (!repush == []));
     List.iter (enqueue_assigned env) !repush
 
