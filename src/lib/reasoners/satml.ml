@@ -1742,7 +1742,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       match env.next_decision with
       | Some a ->
         env.next_decision <- None;
-        Atom a
+        if a.var.level >= 0 then
+          (* Already propagated *)
+          pick_branch_lit env
+        else
+          Atom a
       | None ->
         match Vheap.peek_min env.order with
         | v when v.level >= 0 ->
