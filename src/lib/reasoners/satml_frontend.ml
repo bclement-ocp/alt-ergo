@@ -596,7 +596,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
           Some [
             match Shostak.Literal.view @@ Atom.literal at with
             | LTerm at -> at
-            | LSem _ -> assert false
+            | LSem _ ->
+              (* Flat formulas only contain syntaxic literals. *)
+              assert false
           ]
 
       | FF.AND l ->
@@ -872,7 +874,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     let elit a =
       match Shostak.Literal.view @@ Atom.literal a with
       | LTerm a -> a
-      | LSem _ -> assert false
+      | LSem _ ->
+        (* This is only called on newly added skolems, which are always
+           syntaxic literals *)
+        assert false
     in
     let bot_abstr_vars = (* try to immediately expand newly added skolems *)
       List.fold_left (fun acc at ->
