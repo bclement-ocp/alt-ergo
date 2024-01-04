@@ -92,6 +92,8 @@ module type SAT_ML = sig
 
   val solve : t -> unit
 
+  val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t
+
   val set_new_proxies :
     t -> (Atom.atom * Atom.atom list * bool) Util.MI.t -> unit
 
@@ -1770,7 +1772,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           | split :: splits, ks ->
             env.pending_splits <- splits, ks;
             Split split
-          | [], false ->
+          | [], false -> (* TODO: when not produce_model *)
             let v = pick_branch_var env in
             Atom v.na
           | [], true ->
@@ -1796,7 +1798,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       )
     | Atom atom -> atom
 
-  let search env strat n_of_conflicts n_of_learnts =
+  let search ?(produce_model = false) env strat n_of_conflicts n_of_learnts =
     let conflictC = ref 0 in
     env.starts <- env.starts + 1;
     while true do
@@ -1820,8 +1822,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           (Options.get_cdcl_tableaux_inst () &&
            Matoms.is_empty env.lazy_cnf)
         ) then (
-        (* TODO: if produce_model then ... *)
-        if false then (
+        if produce_model then (
           let pending_splits, tenv = Th.theory_decide ~for_model:true env.tenv in
           let ks = not (Lists.is_empty pending_splits) in
           env.tenv <- tenv;
@@ -1848,7 +1849,17 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       let next =
         match !strat with
-        | Auto -> pick_and_split env
+        | Auto -> (
+            try
+              pick_and_split env
+            with Sat when produce_model ->
+              let pending_splits, tenv = Th.theory_decide ~for_model:true env.tenv in
+              let ks = not (Lists.is_empty pending_splits) in
+              env.tenv <- tenv;
+              env.pending_splits <-
+                List.filter_map (theory_split env) pending_splits, ks;
+              pick_and_split env
+          )
         | Stop -> raise Stopped
         | Interactive f ->
           strat := Stop; f
@@ -1886,14 +1897,14 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
      check_vec env.learnts
   *)
 
-  let solve env =
+  let solve_aux ~produce_model env =
     if env.is_unsat then raise (Unsat env.unsat_core);
     let n_of_conflicts = ref (Atom.to_float env.restart_first) in
     let n_of_learnts =
       ref ((Atom.to_float (nb_clauses env)) *. env.learntsize_factor) in
     try
       while true do
-        (try search env (ref Auto)
+        (try search ~produce_model env (ref Auto)
                (Atom.to_int !n_of_conflicts) (Atom.to_int !n_of_learnts);
          with Restart -> ());
         n_of_conflicts := !n_of_conflicts *. env.restart_inc;
@@ -1908,6 +1919,14 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     | (Unsat _) as e ->
       (* check_unsat_core cl; *)
       raise e
+
+  let solve = solve_aux ~produce_model:false
+
+  let compute_concrete_model env =
+    try
+      solve_aux ~produce_model:true env;
+      assert false
+    with Sat -> Th.compute_concrete_model env.tenv
 
   exception Trivial
 

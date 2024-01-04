@@ -47,6 +47,8 @@ module type SAT_ML = sig
 
   val solve : t -> unit
 
+  val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t
+
   val set_new_proxies :
     t ->
     (Satml_types.Atom.atom * Satml_types.Atom.atom list * bool) Util.MI.t ->

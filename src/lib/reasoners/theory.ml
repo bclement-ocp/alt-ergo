@@ -939,13 +939,15 @@ module Main_Default : S = struct
   let get_case_split_env t = t.gamma_finite
 
   let compute_concrete_model env =
+    let { gamma; assumed_set; objectives; _ } = env in
+    (*
     let { gamma_finite; assumed_set; objectives; _ }, _ =
       do_case_split_aux env ~for_model:true
-    in
+    in *)
     lazy (
       CC_X.extract_concrete_model
         ~prop_model:assumed_set
-        gamma_finite
+        gamma
     ), objectives
 
   let assume_th_elt t th_elt dep =

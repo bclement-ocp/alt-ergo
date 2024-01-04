@@ -979,9 +979,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     if compute then begin
       try
         (* also performs case-split and pushes pending atoms to CS *)
-        let model, objectives =
-          Th.compute_concrete_model (SAT.current_tbox env.satml)
-        in
+        let model, objectives = SAT.compute_concrete_model env.satml in
         env.last_saved_model <- Some model;
         env.last_saved_objectives <- Some objectives;
       with Ex.Inconsistent (_expl, _classes) as e ->
