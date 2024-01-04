@@ -432,8 +432,11 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       (fun acc (gf, dep) ->
          match literals_of_ex dep with
          | []  ->
+           (* Toplevel assertions from [axiom_def] have no literals *)
            gf :: acc
          | [{ Atom.lit; _ }] -> (
+             (* Instantiations from [internal_axiom_def] are justified by a
+                single syntaxic literal (from [axs_of_abstr]) *)
              match Shostak.Literal.view lit with
              | LTerm lit ->
                {gf with
@@ -468,7 +471,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     let lat =
       match Shostak.Literal.view @@ Atom.literal at with
       | LTerm at -> at
-      | LSem _ -> assert false
+      | LSem _ ->
+        (* Abstractions are always fresh expressions, so `at` is always a
+           syntaxic literal *)
+        assert false
     in
     let new_abstr_vars =
       if not (Atom.is_true at) then at :: new_abstr_vars else new_abstr_vars
