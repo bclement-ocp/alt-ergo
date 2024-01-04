@@ -167,7 +167,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     { atom = Atom.dummy_atom ; is_cs = true ; origin = Th_util.Other }
 
   let is_split (a : Atom.atom) =
-    match a.lit with Lsem _ -> true | Lterm _ -> false
+    match Shostak.Literal.view a.lit with
+    | LSem _ -> true
+    | LTerm _ -> false
 
   type th = Th.t
   type t =
@@ -854,8 +856,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     Vec.shrink watched dead_part
 
   let theory_split env (aview, is_cs, origin) =
+    let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
     let atom, _ =
-      Atom.add_lit_atom env.hcons_env (Lsem (Shostak.Literal.make aview)) []
+      Atom.add_lit_atom env.hcons_env alit []
     in
     if atom.is_true || atom.neg.is_true then (
       None
@@ -953,13 +956,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       formula that [a] was a proxy for to the [lazy_cnf] (see
       [add_form_to_lazy_cnf]). *)
   let relevancy_propagation env ma (a, origin) =
-    match Atom.literal a with
-    | Lsem _ ->
+    match Shostak.Literal.view @@ Atom.literal a with
+    | LSem _ ->
       (* Always propagate back semantic literals to the theory. *)
       Queue.push (a, origin) env.th_tableaux;
       ma
 
-    | Lterm _ ->
+    | LTerm _ ->
       try
         let parents, f_a = Matoms.find a ma in
         let ma = Matoms.remove a ma in
@@ -1077,14 +1080,14 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Ex.singleton (Ex.Literal ta)
           else Ex.empty
         in
-        assert (match ta.lit with Lterm a -> E.is_ground a | Lsem _ -> true);
+        assert (match Shostak.Literal.view ta.lit with LTerm a -> E.is_ground a | LSem _ -> true);
         let th_imp =
           if ta.timp = -1 then
-            match Atom.literal a with
-            | Lsem _ ->
+            match Shostak.Literal.view @@ Atom.literal a with
+            | LSem _ ->
               (* TODO: We probably could propagate splits as well. *)
               false
-            | Lterm lit ->
+            | LTerm lit ->
               match Th.query lit env.tenv with
               | Some _ ->
                 a.timp <- 1;
@@ -1711,11 +1714,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let th_entailed tenv a =
     if Options.get_no_tcp () || not (Options.get_minimal_bj ()) then None
     else
-      match Atom.literal a with
-      | Lsem _ ->
+      match Shostak.Literal.view @@ Atom.literal a with
+      | LSem _ ->
         (* TODO: We probably could propagate splits as well. *)
         None
-      | Lterm lit ->
+      | LTerm lit ->
         match Th.query lit tenv with
         | Some (d,_) ->
           a.timp <- 1;

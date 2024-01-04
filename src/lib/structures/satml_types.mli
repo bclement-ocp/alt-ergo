@@ -28,28 +28,6 @@
 (*                                                                        *)
 (**************************************************************************)
 
-module BLit : sig
-  type t =
-    | Lterm of Expr.t
-    | Lsem of Shostak.Literal.t
-
-  val pp : t Fmt.t
-
-  val hash : t -> int
-
-  val equal : t -> t -> bool
-
-  val compare : t -> t -> int
-
-  val neg : t -> t
-
-  module Table : Hashtbl.S with type key = t
-
-  module Set : Set.S with type elt = t
-
-  module Map : Map.S with type key = t
-end
-
 module type ATOM = sig
 
   type var =
@@ -66,7 +44,7 @@ module type ATOM = sig
 
   and atom =
     { var : var;
-      lit : BLit.t;
+      lit : Shostak.Literal.t;
       neg : atom;
       mutable watched : clause Vec.t;
       mutable is_true : bool;
@@ -97,7 +75,7 @@ module type ATOM = sig
   val pr_clause : Format.formatter -> clause -> unit
   val get_atom : hcons_env -> Expr.t ->  atom
 
-  val literal : atom -> BLit.t
+  val literal : atom -> Shostak.Literal.t
   val weight : atom -> float
   val is_true : atom -> bool
   val neg : atom -> atom
@@ -132,7 +110,7 @@ module type ATOM = sig
   val hash_atom  : atom -> int
   val tag_atom   : atom -> int
 
-  val add_lit_atom : hcons_env -> BLit.t -> var list -> atom * var list
+  val add_lit_atom : hcons_env -> Shostak.Literal.t -> var list -> atom * var list
   val add_atom : hcons_env -> Expr.t -> var list -> atom * var list
 
   module Set : Set.S with type elt = atom

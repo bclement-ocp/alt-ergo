@@ -840,10 +840,11 @@ module Make (Th : Theory.S) = struct
                  "%a is not ground" E.print a;
                assert false
              end;
-             let facts = (Satml_types.BLit.Lterm a, Th_util.Other, ex, dlvl, plvl) :: facts in
+             let alit = Shostak.Literal.make (LTerm a) in
+             let facts = (alit, Th_util.Other, ex, dlvl, plvl) :: facts in
              let ufacts =
                if Ex.has_no_bj ex then
-                 (Satml_types.BLit.Lterm a, Th_util.Other, ex, dlvl, plvl) :: ufacts
+                 (alit, Th_util.Other, ex, dlvl, plvl) :: ufacts
                else ufacts
              in
              if not ff.E.mf then begin

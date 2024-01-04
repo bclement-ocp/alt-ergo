@@ -823,10 +823,12 @@ module MXH =
 module SXH =
   Set.Make(struct type t = Combine.r let compare = Combine.hash_cmp end)
 
-module Literal = Xliteral.Make(struct
+module L = Xliteral.Make(struct
     type t = Combine.r
 
     include Combine
 
     let compare = hash_cmp
   end)
+
+module Literal = Literal.Make(L)

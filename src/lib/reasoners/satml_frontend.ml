@@ -433,10 +433,14 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
          match literals_of_ex dep with
          | []  ->
            gf :: acc
-         | [{ Atom.lit = Lterm lit; _ }] ->
-           {gf with
-            E.ff =
-              E.mk_or gf.E.ff (E.neg lit) false} :: acc
+         | [{ Atom.lit; _ }] -> (
+             match Shostak.Literal.view lit with
+             | LTerm lit ->
+               {gf with
+                E.ff =
+                  E.mk_or gf.E.ff (E.neg lit) false} :: acc
+             | LSem _ -> assert false
+           )
          | _   -> assert false
       )acc l
 
@@ -462,7 +466,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         ~module_name:"Satml_frontend" ~function_name:"register_abstraction"
         "abstraction of %a is %a" E.print f FF.print af;
     let lat =
-      match Atom.literal at with Lterm at -> at | Lsem _ -> assert false
+      match Shostak.Literal.view @@ Atom.literal at with
+      | LTerm at -> at
+      | LSem _ -> assert false
     in
     let new_abstr_vars =
       if not (Atom.is_true at) then at :: new_abstr_vars else new_abstr_vars
@@ -582,7 +588,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         if not (Atom.is_true at) then None
         else
           Some [
-            match Atom.literal at with Lterm at -> at | Lsem _ -> assert false
+            match Shostak.Literal.view @@ Atom.literal at with
+            | LTerm at -> at
+            | LSem _ -> assert false
           ]
 
       | FF.AND l ->
@@ -636,7 +644,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         else add_reasons_graph (SA.elements sa) SA.empty
       in
       let add_elit a s =
-        match Atom.literal a with Lterm a -> SE.add a s | Lsem _ -> s
+        match Shostak.Literal.view @@ Atom.literal a with
+        | LTerm a -> SE.add a s
+        | LSem _ -> s
       in
       SA.fold add_elit sa SE.empty
 
@@ -854,7 +864,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
   let rec assume_aux ~dec_lvl env l =
     let updated, new_abstr_vars = assume_aux_bis ~dec_lvl env l in
     let elit a =
-      match Atom.literal a with Lterm a -> a | Lsem _ -> assert false
+      match Shostak.Literal.view @@ Atom.literal a with
+      | LTerm a -> a
+      | LSem _ -> assert false
     in
     let bot_abstr_vars = (* try to immediately expand newly added skolems *)
       List.fold_left (fun acc at ->
@@ -1340,9 +1352,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         let bmodel = SAT.boolean_model env.satml in
         Stdcompat.List.find_map
           (fun Atom.{lit; neg = {lit=neglit; _}; _} ->
-             if Satml_types.BLit.equal (Lterm t) lit then
+             let tlit = Shostak.Literal.make (LTerm t) in
+             if Shostak.Literal.equal tlit lit then
                Some E.vrai
-             else if Satml_types.BLit.equal (Lterm t) neglit then
+             else if Shostak.Literal.equal tlit neglit then
                Some E.faux
              else
                None

@@ -38,7 +38,7 @@ module type S = sig
      decreasing order with respect to (dlvl, plvl) *)
   val assume :
     ?ordered:bool ->
-    (Satml_types.BLit.t * Th_util.lit_origin * Explanation.t * int * int) list
+    (Shostak.Literal.t * Th_util.lit_origin * Explanation.t * int * int) list
     -> t -> t * Expr.Set.t * int
 
   val optimize : t -> is_max:bool -> Expr.t -> t

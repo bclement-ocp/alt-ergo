@@ -162,7 +162,7 @@ let add_diseq hss sm1 sm2 dep env eqs =
       if HSS.cardinal enum = 1 then
         let h' = HSS.choose enum in
         env,
-        (Sig_rel.LSem (LR.mkv_eq r (Sh.is_mine (Cons(h',ty)))),
+        (Literal.LSem (LR.mkv_eq r (Sh.is_mine (Cons(h',ty)))),
          ex, Th_util.Other)::eqs
       else env, eqs
 
@@ -175,7 +175,7 @@ let add_diseq hss sm1 sm2 dep env eqs =
         let ex = Ex.union dep ex1 in
         let h' = HSS.choose enum1 in
         let ty = X.type_info r1 in
-        (Sig_rel.LSem (LR.mkv_eq r1 (Sh.is_mine (Cons(h',ty)))),
+        (Literal.LSem (LR.mkv_eq r1 (Sh.is_mine (Cons(h',ty)))),
          ex, Th_util.Other)::eqs
       else eqs
     in
@@ -184,7 +184,7 @@ let add_diseq hss sm1 sm2 dep env eqs =
         let ex = Ex.union dep ex2 in
         let h' = HSS.choose enum2 in
         let ty = X.type_info r2 in
-        (Sig_rel.LSem (LR.mkv_eq r2 (Sh.is_mine (Cons(h',ty)))),
+        (Literal.LSem (LR.mkv_eq r2 (Sh.is_mine (Cons(h',ty)))),
          ex, Th_util.Other)::eqs
       else eqs
     in
@@ -224,7 +224,7 @@ let add_eq hss sm1 sm2 dep env eqs =
     if HSS.cardinal diff = 1 then
       let h' = HSS.choose diff in
       let ty = X.type_info r1 in
-      env, (Sig_rel.LSem (LR.mkv_eq r1 (Sh.is_mine (Cons(h',ty)))),
+      env, (Literal.LSem (LR.mkv_eq r1 (Sh.is_mine (Cons(h',ty)))),
             ex, Th_util.Other)::eqs
     else env, eqs
 

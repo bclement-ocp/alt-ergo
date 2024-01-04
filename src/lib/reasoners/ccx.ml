@@ -270,7 +270,7 @@ module Main : S = struct
           let ex = List.fold_left2 (explain_equality env) Ex.empty xs1 xs2 in
           let a = E.mk_eq ~iff:false t1 t2 in
           Debug.congruent a ex;
-          Q.push (Sig_rel.LTerm a, ex, Th_util.Other) facts.equas
+          Q.push (Literal.LTerm a, ex, Th_util.Other) facts.equas
         with Exit -> ()
 
   let congruents env (facts: r Sig_rel.facts) t1 s =
@@ -349,7 +349,7 @@ module Main : S = struct
                    | Some (ex_r, _) ->
                      let a = E.mk_distinct ~iff:false [x; y] in
                      Debug.contra_congruence a ex_r;
-                     Q.push (Sig_rel.LTerm a, ex_r, Th_util.Other) facts.diseqs
+                     Q.push (Literal.LTerm a, ex_r, Th_util.Other) facts.diseqs
                    | None -> assert false
                  end
              | _ -> ()
@@ -612,7 +612,7 @@ module Main : S = struct
         | A.Distinct (false, lr) -> assume_dist env facts lr ex
         | A.Distinct (true, _) -> assert false
         | A.Pred _ ->
-          Q.push (Sig_rel.LSem sa, ex, orig) facts.equas;
+          Q.push (Literal.LSem sa, ex, orig) facts.equas;
           env
         | _ -> assert false
       in

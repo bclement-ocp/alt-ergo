@@ -559,7 +559,7 @@ module Debug = struct
   let implied_equalities l =
     if get_debug_fm () then
       let pp_literal ppf = function
-        | Sig_rel.LTerm e -> Expr.print ppf e
+        | Literal.LTerm e -> Expr.print ppf e
         | LSem ra -> LR.print ppf (LR.make ra)
       in
       let print fmt (ra, ex, _) =

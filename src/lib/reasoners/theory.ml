@@ -39,11 +39,7 @@ module Sy = Symbols
 
 module CC_X = Ccx.Main
 
-module BLit = Satml_types.BLit
-
-let literal_of_blit = function
-  | BLit.Lterm a -> Sig_rel.LTerm a
-  | Lsem a -> LSem (Shostak.Literal.view a)
+module L = Shostak.Literal
 
 module type S = sig
   type t
@@ -55,7 +51,7 @@ module type S = sig
      decreasing order with respect to (dlvl, plvl) *)
   val assume :
     ?ordered:bool ->
-    (BLit.t * Th_util.lit_origin * Explanation.t * int * int) list -> t ->
+    (L.t * Th_util.lit_origin * Explanation.t * int * int) list -> t ->
     t * Expr.Set.t * int
 
   val optimize : t -> is_max:bool -> Expr.t -> t
@@ -117,10 +113,10 @@ module Main_Default : S = struct
       List.fold_left
         (List.fold_left
            (fun st (a, _, _) ->
-              match a with
-              | BLit.Lterm a ->
+              match L.view a with
+              | LTerm a ->
                 Expr.Set.union st (E.sub_terms SE.empty a)
-              | Lsem _ -> st)
+              | LSem _ -> st)
         )SE.empty l
 
     let types_of_subterms st =
@@ -269,13 +265,13 @@ module Main_Default : S = struct
                  print_dbg ~flushed:false ~header:false
                    "( (* %d , %d *) %a "
                    dlvl plvl
-                   BLit.pp a;
+                   L.pp a;
                  List.iter
                    (fun (a, dlvl, plvl) ->
                       print_dbg ~flushed:false ~header:false
                         " and@ (* %d , %d *) %a "
                         dlvl plvl
-                        BLit.pp a
+                        L.pp a
                    ) l;
                  print_dbg ~flushed:false ~header:false ") ->@ "
             ) (List.rev l);
@@ -352,9 +348,9 @@ module Main_Default : S = struct
 
   type t = {
     assumed_set : E.Set.t;
-    assumed : (BLit.t * int * int) list list;
+    assumed : (L.t * int * int) list list;
     cs_pending_facts :
-      (BLit.t * Th_util.lit_origin * Ex.t * int * int) list list;
+      (L.t * Th_util.lit_origin * Ex.t * int * int) list list;
     terms : Expr.Set.t;
     gamma : CC_X.t;
     gamma_finite : CC_X.t;
@@ -688,7 +684,12 @@ module Main_Default : S = struct
     List.iter
       (List.iter
          (fun (a, o, ex,_dlvl,_plvl) ->
-            CC_X.add_fact facts (literal_of_blit a, ex, o))
+            let a =
+              match L.view a with
+              | LTerm _ as a -> a
+              | LSem a -> LSem (LR.view a)
+            in
+            CC_X.add_fact facts (a, ex, o))
       ) in_facts_l;
 
     let t, ch = try_it t facts ~for_model in
@@ -754,13 +755,18 @@ module Main_Default : S = struct
     let assumed, assumed_set, cpt =
       List.fold_left
         (fun ((assumed, assumed_set, cpt) as accu) ((a, o, ex, dlvl, plvl)) ->
-           match a with
-           | BLit.Lterm a when E.Set.mem a assumed_set -> accu
-           | _ ->
-             CC_X.add_fact facts (literal_of_blit a, ex, o);
+           match L.view a with
+           | Literal.LTerm a when E.Set.mem a assumed_set -> accu
+           | aview ->
+             let aview =
+               match aview with
+               | LTerm t -> Literal.LTerm t
+               | LSem a -> LSem (LR.view a)
+             in
+             CC_X.add_fact facts (aview, ex, o);
              let assumed_set =
-               match a with
-               | Lterm a -> E.Set.add a assumed_set
+               match aview with
+               | LTerm a -> E.Set.add a assumed_set
                | _ -> assumed_set
              in
              (a, dlvl, plvl) :: assumed,
@@ -904,7 +910,9 @@ module Main_Default : S = struct
       }
     in
     let a = E.mk_distinct ~iff:false [E.vrai; E.faux] in
-    let t, _, _ = assume true [Lterm a, Th_util.Other, Ex.empty, 0, -1] t in
+    let t, _, _ =
+      assume true [L.make @@ Literal.LTerm a, Th_util.Other, Ex.empty, 0, -1] t
+    in
     t
 
   let cl_extract env = CC_X.cl_extract env.gamma
@@ -986,9 +994,9 @@ module Main_Empty : S = struct
     let assumed_set =
       List.fold_left
         (fun assumed_set ((a, _, _, _, _)) ->
-           match a with
-           | BLit.Lterm a -> E.Set.add a assumed_set
-           | Lsem _ -> assumed_set
+           match L.view a with
+           | LTerm a -> E.Set.add a assumed_set
+           | LSem _ -> assumed_set
         ) t.assumed_set in_facts
     in
     {assumed_set}, E.Set.empty, 0

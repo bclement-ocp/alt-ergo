@@ -37,7 +37,7 @@ module E = Expr
 module ME = Expr.Map
 module SE = Expr.Set
 
-module LX = Shostak.Literal
+module LX = Shostak.L
 module MapL = Emap.Make(LX)
 
 module MapX = struct
