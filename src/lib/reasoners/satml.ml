@@ -1769,10 +1769,16 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                   let splits, tenv = Th.theory_decide ~for_model env.tenv in
                   let keep_splitting = splits != [] in
                   env.tenv <- tenv;
-                  env.pending_splits <-
-                    List.filter_map (theory_split env) splits;
-                  env.should_split <- keep_splitting;
-                  pick_branch_lit env
+
+                  if keep_splitting then (
+                    env.pending_splits <-
+                      List.filter_map (theory_split env) splits;
+                    env.should_split <- true;
+                    pick_branch_lit env
+                  ) else (
+                    ignore (Vheap.remove_min env.order);
+                    v.na
+                  )
           )
         | exception Not_found ->
           match env.next_decision with
@@ -1798,17 +1804,27 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                 raise Exit
               )
 
-            | [] when not env.should_split ->
+            | [] when
+                not env.should_split &&
+                Options.get_case_split_policy () != AfterTheoryAssume
+              ->
+              (* Special case for AfterTheoryAssume to ensure we perform splits
+                 even if there are no available decisions, in which case we
+                 would never do theory propagations inside [solve] otherwise. *)
               raise Sat
 
             | [] ->
               let splits, tenv = Th.theory_decide ~for_model env.tenv in
               let keep_splitting = splits != [] in
               env.tenv <- tenv;
-              env.pending_splits <-
-                List.filter_map (theory_split env) splits;
-              env.should_split <- keep_splitting;
-              pick_branch_lit env
+
+              if keep_splitting then (
+                env.pending_splits <-
+                  List.filter_map (theory_split env) splits;
+                env.should_split <- true;
+                pick_branch_lit env
+              ) else
+                raise Sat
 
     in
     (* If we are building a model, always try generating case splits. *)
@@ -1912,6 +1928,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       raise e
 
   let solve env =
+    (* Don't start with splitting. *)
+    if Options.get_case_split_policy () == AfterTheoryAssume then
+      env.should_split <- false;
     solve_aux ~for_model:false env
 
   let compute_concrete_model env =
