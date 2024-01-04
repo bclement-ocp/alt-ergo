@@ -713,7 +713,6 @@ module Main_Default : S = struct
         let objectives =
           Objective.Model.add obj opt_split.value env.objectives
         in
-        let env = { env with objectives } in
         match opt_split.value with
         | Unknown ->
           (* In the current implementation of optimization, the function
@@ -743,7 +742,7 @@ module Main_Default : S = struct
           [], env
 
         | Pinfinity | Minfinity | Limit _ | Value _ ->
-          [ opt_split.case_split ], env
+          [ opt_split.case_split ], { env with objectives }
       )
     | None ->
       let splits, gamma = CC_X.case_split env.gamma ~for_model in
@@ -944,7 +943,7 @@ module Main_Default : S = struct
   let extract_ground_terms env = env.terms
 
   let get_real_env t = t.gamma
-  let get_case_split_env t = t.gamma_finite
+  let get_case_split_env t = t.gamma
 
   let compute_concrete_model env =
     let { gamma; assumed_set; objectives; _ } = env in

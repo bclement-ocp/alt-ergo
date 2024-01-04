@@ -115,7 +115,8 @@ module Model = struct
     try
       M.iter (fun { f; order } v ->
           match (v : Value.t) with
-          | Value _ -> ()
+          | Value _ ->
+            ()
           | Limit _ | Pinfinity | Minfinity when for_model ->
             (* While generating models, keeps optimizing values with
                lower priority even if we see a limit value. *)
