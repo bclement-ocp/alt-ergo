@@ -1750,7 +1750,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               match env.pending_splits with
               | split :: splits, ks ->
                 env.pending_splits <- splits, ks;
-                Split split
+                if split.is_cs then (
+                  env.next_decision <- Some split.atom;
+                  ignore (Vheap.remove_min env.order);
+                  Atom v.na
+                ) else
+                  Split split
               | [], false ->
                 let v = pick_branch_var env in
                 Atom v.na
