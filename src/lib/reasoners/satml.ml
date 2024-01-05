@@ -1370,6 +1370,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       match learnt with
       | [] -> assert false
       | [(fuip : Atom.atom)] ->
+        assert (not (is_split fuip));
         fuip.var.vpremise <- history;
         enqueue env fuip 0 None
       | fuip :: _ ->
@@ -1387,9 +1388,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           Vec.push env.learnts lclause;
           attach_clause env lclause;
           clause_bump_activity env lclause;
+          let propag_lvl = best_propagation_level env lclause in
+          enqueue env fuip propag_lvl (Some lclause)
         );
-        let propag_lvl = best_propagation_level env lclause in
-        enqueue env fuip propag_lvl (Some lclause)
     end;
     if not is_T_learn then begin
       var_decay_activity env;
@@ -1585,6 +1586,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         cancel_until env blevel;
         record_learnt_clause env ~is_T_learn:false blevel learnt history
       | Some (a, blevel, propag_lvl) ->
+        assert (not (is_split a));
         assert (a.neg.is_true);
         cancel_until env blevel;
         assert (not a.neg.is_true);
@@ -2095,6 +2097,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       let old_lazy = env.lazy_cnf in
       let old_relevants = env.relevants in
       let old_tenv = env.tenv in
+      let old_decision = env.next_decision in
       let fictive_lazy =
         SFF.fold (fun ff acc -> add_form_to_lazy_cnf env acc ff)
           sf old_lazy
@@ -2106,6 +2109,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       else
         begin
           assert (old_dlvl == new_dlvl);
+          env.next_decision <- old_decision;
           env.lazy_cnf <- old_lazy;
           env.relevants <- old_relevants;
           env.tenv     <- old_tenv
