@@ -1755,7 +1755,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                   let splits, tenv = Th.theory_decide ~for_model env.tenv in
 
                   match splits with
-                  | [ (aview, is_cs, origin) ] ->
+                  | (aview, is_cs, origin) :: _ ->
                     let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
                     let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
                     if atom.var.level >= 0 then (
@@ -1779,7 +1779,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                     env.should_split <- false;
                     ignore (Vheap.remove_min env.order);
                     v.na
-                  | _ -> assert false
                 )
           )
         | exception Not_found ->
@@ -1795,7 +1794,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               let splits, tenv = Th.theory_decide ~for_model env.tenv in
 
               match splits with
-              | [ (aview, is_cs, _) ] ->
+              | (aview, is_cs, _) :: _ ->
                 env.tenv <- tenv;
                 let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
                 let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
@@ -1811,7 +1810,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               | [] ->
                 env.should_split <- false;
                 raise Sat
-              | _ -> assert false
             )
 
     in
