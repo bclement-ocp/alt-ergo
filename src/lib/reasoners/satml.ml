@@ -860,7 +860,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Some { atom ; is_cs ; origin }
 
   let do_case_split env origin =
-    if Options.get_case_split_policy () == origin then
+    if Options.get_case_split_policy () == origin && env.tdepth > 0 then
       env.should_split <- true;
     C_none
   (* TODO !!
@@ -1114,7 +1114,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          C_none (* XXX do_case_split env AfterTheoryAssume *)
+          do_case_split env AfterTheoryAssume
         with Ex.Inconsistent (dep, _terms) ->
           (* XXX what to do with terms ? *)
           (* Printer.print_dbg
@@ -1575,6 +1575,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt_bools;
           );
           cancel_until env blevel;
+          (* We backtracked on a semantic decision. Treat the resulting level
+             after cancellation as a semantic level to avoid degenerating into
+             exhaustive enumeration. *)
+          if is_semantic_level then (
+            env.tdepth <- 0
+          );
           record_learnt_clause env ~is_T_learn:false blevel learnt history
       )
 
@@ -1713,15 +1719,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
-  let prefer_split at origin env =
+  let prefer_split origin env =
     match origin with
-    | Th_util.CS (_, sz) ->
-      if Q.(div_2exp sz env.tdepth < ~$1 / ~$256) then (
-        Format.eprintf "@[<v>doing a %a split at level %d (depth %d):@ @[%a@]@]@."
-          Q.pp_print sz (decision_level env) env.tdepth Atom.pr_atom at;
-        true
-      ) else
-        false
+    | Th_util.CS (_, sz) -> Q.(div_2exp sz env.tdepth < ~$1 / ~$256)
     | _ -> true
 
   let pick_branch_lit ?(for_model = false) env =
@@ -1774,9 +1774,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                     raise Exit (* FIXME *)
                   | split :: _ when
                       env.should_split
-                      && prefer_split split.atom split.origin env
+                      && prefer_split split.origin env
                     ->
-                    env.should_split <- true;
+                    env.should_split <- false;
                     split.atom
                   | _ ->
                     env.should_split <- env.should_split && not (Lists.is_empty splits);
@@ -1802,10 +1802,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               | split :: _ when not split.is_cs ->
                 enqueue env split.atom (decision_level env) None;
                 raise Exit (* FIXME *)
-              | split :: _ when env.should_split ->
+              | split :: _ ->
                 env.should_split <- true;
                 split.atom
-              | _ ->
+              | [] ->
                 env.should_split <- false;
                 raise Sat
             )
