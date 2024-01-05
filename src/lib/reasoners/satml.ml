@@ -409,9 +409,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       mutable next_dec_guard : int;
 
-      mutable pending_splits: split list;
+      mutable tdepth : int;
+
+      tdepth_queue : int Vec.t;
 
       mutable should_split : bool;
+
+      should_split_queue : bool Vec.t;
 
       mutable next_decision : Atom.atom option ;
     }
@@ -525,9 +529,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       next_dec_guard = 0;
 
-      pending_splits = [];
+      tdepth = 0;
+
+      tdepth_queue = Vec.make 100 ~dummy:(-1);
 
       should_split = false;
+
+      should_split_queue = Vec.make 100 ~dummy:false;
 
       next_decision = None;
     }
@@ -576,6 +584,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     if Options.get_profiling() then
       Profiling.decision (decision_level env) "<none>";
     Vec.push env.tenv_queue env.tenv; (* save the current tenv *)
+    Vec.push env.tdepth_queue env.tdepth;
+    Vec.push env.should_split_queue env.should_split;
     if Options.get_cdcl_tableaux () then begin
       Vec.push env.lazy_cnf_queue env.lazy_cnf;
       Vec.push env.relevants_queue env.relevants
@@ -677,7 +687,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Queue.clear env.th_tableaux;
       env.nassign <- Vec.get env.nassign_queue lvl;
       env.tenv <- Vec.get env.tenv_queue lvl; (* recover the right tenv *)
-      env.pending_splits <- [];
+      env.tdepth <- Vec.get env.tdepth_queue lvl;
+      env.should_split <- Vec.get env.should_split_queue lvl;
       env.should_split <- false;
       env.next_decision <- None;
       if Options.get_cdcl_tableaux () then begin
@@ -687,6 +698,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Vec.shrink env.trail ((Vec.size env.trail) - env.qhead);
       Vec.shrink env.trail_lim ((Vec.size env.trail_lim) - lvl);
       Vec.shrink env.nassign_queue ((Vec.size env.nassign_queue) - lvl);
+      Vec.shrink env.tdepth_queue ((Vec.size env.tdepth_queue) - lvl);
+      Vec.shrink env.should_split_queue ((Vec.size env.should_split_queue) - lvl);
       Vec.shrink env.tenv_queue ((Vec.size env.tenv_queue) - lvl);
       if Options.get_cdcl_tableaux () then begin
         Vec.shrink
@@ -841,11 +854,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     let atom, _ =
       Atom.add_lit_atom env.hcons_env alit []
     in
-    if atom.is_true || atom.neg.is_true then (
+    if atom.var.level >= 0 then
       None
-    ) else (
+    else
       Some { atom ; is_cs ; origin }
-    )
 
   let do_case_split env origin =
     if Options.get_case_split_policy () == origin then
@@ -1102,7 +1114,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          do_case_split env AfterTheoryAssume
+          C_none (* XXX do_case_split env AfterTheoryAssume *)
         with Ex.Inconsistent (dep, _terms) ->
           (* XXX what to do with terms ? *)
           (* Printer.print_dbg
@@ -1578,16 +1590,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       | None  ->
         let blevel, learnt, history =
           conflict_analyze_aux env c !max_lvl in
-        Printer.print_dbg
-          "@[<v 2>Unfixable bool cancel:@ %a@]"
-          Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt;
         cancel_until env blevel;
         record_learnt_clause env ~is_T_learn:false blevel learnt history
       | Some (a, blevel, propag_lvl) ->
         assert (a.neg.is_true);
-        Printer.print_dbg
-          "@[<v 2>Fixable bool cancel:@ %d@]"
-          propag_lvl;
         cancel_until env blevel;
         assert (not a.neg.is_true);
         assert (propag_lvl >= 0 && propag_lvl <= blevel);
@@ -1707,6 +1713,17 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
+  let prefer_split at origin env =
+    match origin with
+    | Th_util.CS (_, sz) ->
+      if Q.(div_2exp sz env.tdepth < ~$1 / ~$256) then (
+        Format.eprintf "@[<v>doing a %a split at level %d (depth %d):@ @[%a@]@]@."
+          Q.pp_print sz (decision_level env) env.tdepth Atom.pr_atom at;
+        true
+      ) else
+        false
+    | _ -> true
+
   let pick_branch_lit ?(for_model = false) env =
     let rec pick_branch_lit env =
       (* The choice of the next literal to branch on is as follows:
@@ -1746,39 +1763,26 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                   pick_branch_lit env
                 ) else
                   a
-              | None ->
-                match env.pending_splits with
-                | split :: splits ->
-                  env.pending_splits <- splits;
-
-                  if split.atom.var.level >= 0 then (
-                    assert (split.atom.is_true || split.atom.neg.is_true);
-                    pick_branch_lit env
-                  ) else if split.is_cs then (
-                    env.next_decision <- Some split.atom;
-                    ignore (Vheap.remove_min env.order);
-                    v.na
-                  ) else (
-                    enqueue env split.atom (decision_level env) None;
-                    raise Exit
-                  )
-                | [] when not env.should_split ->
-                  ignore (Vheap.remove_min env.order);
-                  v.na
-                | [] ->
+              | None -> (
                   let splits, tenv = Th.theory_decide ~for_model env.tenv in
-                  let keep_splitting = splits != [] in
                   env.tenv <- tenv;
 
-                  if keep_splitting then (
-                    env.pending_splits <-
-                      List.filter_map (theory_split env) splits;
+                  let splits = List.filter_map (theory_split env) splits in
+                  match splits with
+                  | split :: _ when not split.is_cs ->
+                    enqueue env split.atom (decision_level env) None;
+                    raise Exit (* FIXME *)
+                  | split :: _ when
+                      env.should_split
+                      && prefer_split split.atom split.origin env
+                    ->
                     env.should_split <- true;
-                    pick_branch_lit env
-                  ) else (
+                    split.atom
+                  | _ ->
+                    env.should_split <- env.should_split && not (Lists.is_empty splits);
                     ignore (Vheap.remove_min env.order);
                     v.na
-                  )
+                )
           )
         | exception Not_found ->
           match env.next_decision with
@@ -1789,42 +1793,22 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               pick_branch_lit env
             ) else
               a
-          | None ->
-            match env.pending_splits with
-            | split :: splits ->
-              env.pending_splits <- splits;
-
-              if split.atom.var.level >= 0 then (
-                assert (split.atom.is_true || split.atom.neg.is_true);
-                pick_branch_lit env
-              ) else if split.is_cs then
-                split.atom
-              else (
-                enqueue env split.atom (decision_level env) None;
-                raise Exit
-              )
-
-            | [] when
-                not env.should_split &&
-                Options.get_case_split_policy () != AfterTheoryAssume
-              ->
-              (* Special case for AfterTheoryAssume to ensure we perform splits
-                 even if there are no available decisions, in which case we
-                 would never do theory propagations inside [solve] otherwise. *)
-              raise Sat
-
-            | [] ->
+          | None -> (
               let splits, tenv = Th.theory_decide ~for_model env.tenv in
-              let keep_splitting = splits != [] in
               env.tenv <- tenv;
 
-              if keep_splitting then (
-                env.pending_splits <-
-                  List.filter_map (theory_split env) splits;
+              let splits = List.filter_map (theory_split env) splits in
+              match splits with
+              | split :: _ when not split.is_cs ->
+                enqueue env split.atom (decision_level env) None;
+                raise Exit (* FIXME *)
+              | split :: _ when env.should_split ->
                 env.should_split <- true;
-                pick_branch_lit env
-              ) else
+                split.atom
+              | _ ->
+                env.should_split <- false;
                 raise Sat
+            )
 
     in
     (* If we are building a model, always try generating case splits. *)
@@ -1838,7 +1822,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     while true do
       propagate_and_stabilize env all_propagations conflictC !strat;
 
-      if Lists.is_empty env.pending_splits && (
+      if not env.should_split && (
           env.nassign = nb_vars env ||
           (Options.get_cdcl_tableaux_inst () &&
            Matoms.is_empty env.lazy_cnf)
@@ -1870,10 +1854,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           | Interactive f ->
             strat := Stop; f
         in
-
         match th_entailed env.tenv next with
         | None ->
           new_decision_level env;
+          if is_split next then
+            env.tdepth <- 0
+          else
+            env.tdepth <- env.tdepth + 1;
           let current_level = decision_level env in
           env.cpt_current_propagations <- 0;
           assert (next.var.level < 0);
@@ -1928,9 +1915,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       raise e
 
   let solve env =
-    (* Don't start with splitting. *)
-    if Options.get_case_split_policy () == AfterTheoryAssume then
-      env.should_split <- false;
     solve_aux ~for_model:false env
 
   let compute_concrete_model env =
