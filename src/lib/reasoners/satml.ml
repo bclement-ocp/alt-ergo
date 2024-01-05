@@ -259,6 +259,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       mutable decisions : int;
 
+      mutable splits : int;
+
       mutable propagations : int;
 
       mutable conflicts : int;
@@ -413,8 +415,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       mutable should_split : bool;
 
-      should_split_queue : bool Vec.t;
-
       mutable next_decision : Atom.atom option ;
     }
 
@@ -482,6 +482,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       decisions = 0;
 
+      splits = 0;
+
       propagations = 0;
 
       conflicts = 0;
@@ -531,9 +533,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       tdepth_queue = Vec.make 100 ~dummy:(-1);
 
-      should_split = true;
-
-      should_split_queue = Vec.make 100 ~dummy:false;
+      should_split = false;
 
       next_decision = None;
     }
@@ -583,7 +583,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Profiling.decision (decision_level env) "<none>";
     Vec.push env.tenv_queue env.tenv; (* save the current tenv *)
     Vec.push env.tdepth_queue env.tdepth;
-    Vec.push env.should_split_queue env.should_split;
     if Options.get_cdcl_tableaux () then begin
       Vec.push env.lazy_cnf_queue env.lazy_cnf;
       Vec.push env.relevants_queue env.relevants
@@ -686,7 +685,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       env.nassign <- Vec.get env.nassign_queue lvl;
       env.tenv <- Vec.get env.tenv_queue lvl; (* recover the right tenv *)
       env.tdepth <- Vec.get env.tdepth_queue lvl;
-      env.should_split <- Vec.get env.should_split_queue lvl;
+      env.should_split <- false;
       env.next_decision <- None;
       if Options.get_cdcl_tableaux () then begin
         env.lazy_cnf <- Vec.get env.lazy_cnf_queue lvl;
@@ -696,7 +695,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Vec.shrink env.trail_lim ((Vec.size env.trail_lim) - lvl);
       Vec.shrink env.nassign_queue ((Vec.size env.nassign_queue) - lvl);
       Vec.shrink env.tdepth_queue ((Vec.size env.tdepth_queue) - lvl);
-      Vec.shrink env.should_split_queue ((Vec.size env.should_split_queue) - lvl);
       Vec.shrink env.tenv_queue ((Vec.size env.tenv_queue) - lvl);
       if Options.get_cdcl_tableaux () then begin
         Vec.shrink
@@ -1101,8 +1099,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          if env.tdepth > 0 then
-            env.should_split <- true;
+          (* if env.tdepth > 0 then *)
+          env.should_split <- true;
           C_none
         with Ex.Inconsistent (dep, _terms) ->
           (* XXX what to do with terms ? *)
@@ -1709,7 +1707,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   let prefer_split origin env =
     match origin with
-    | Th_util.CS (_, sz) -> Q.(div_2exp sz env.tdepth < ~$1 / ~$256)
+    | Th_util.CS (_, sz) -> Q.(div_2exp sz env.tdepth < ~$1)
     | _ -> true
 
   let pick_branch_lit ?(for_model = false) env =
@@ -1732,6 +1730,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           a
         end
       else
+        let split_only =
+          Options.get_cdcl_tableaux_inst () && Matoms.is_empty env.lazy_cnf
+        in
         match Vheap.peek_min env.order with
         | v when v.level >= 0 ->
           assert (v.pa.is_true || v.na.is_true);
@@ -1751,7 +1752,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                   pick_branch_lit env
                 ) else
                   a
-              | None -> (
+              | None ->
+                if env.should_split then (
                   let splits, tenv = Th.theory_decide ~for_model env.tenv in
 
                   match splits with
@@ -1762,11 +1764,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                       env.tenv <- tenv;
                       pick_branch_lit env
                     ) else if is_cs then
-                      if env.should_split && prefer_split origin env then (
+                      if split_only || prefer_split origin env then (
                         env.tenv <- tenv;
-                        env.should_split <- false;
                         atom
-                      ) else (
+                      ) else if split_only then
+                        raise Sat
+                      else (
+                        env.should_split <- false;
                         ignore (Vheap.remove_min env.order);
                         v.na
                       )
@@ -1777,8 +1781,16 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                     )
                   | [] ->
                     env.should_split <- false;
-                    ignore (Vheap.remove_min env.order);
-                    v.na
+
+                    if split_only then
+                      raise Sat
+                    else (
+                      ignore (Vheap.remove_min env.order);
+                      v.na
+                    )
+                ) else (
+                  ignore (Vheap.remove_min env.order);
+                  v.na
                 )
           )
         | exception Not_found ->
@@ -1801,9 +1813,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                 if atom.var.level >= 0 then
                   pick_branch_lit env
                 else if is_cs then (
-                  env.should_split <- true;
+                  env.should_split <- false;
                   atom
                 ) else (
+                  env.should_split <- false;
                   enqueue env atom (decision_level env) None;
                   raise Exit
                 )
@@ -1821,19 +1834,20 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let search ?(for_model = false) env strat n_of_conflicts n_of_learnts =
     let conflictC = ref 0 in
     env.starts <- env.starts + 1;
+    let is_splitting = ref true in
     while true do
+      env.should_split <- false;
       propagate_and_stabilize env all_propagations conflictC !strat;
 
-      if not env.should_split && (
+      if not (env.should_split || !is_splitting) && (
           env.nassign = nb_vars env ||
           (Options.get_cdcl_tableaux_inst () &&
            Matoms.is_empty env.lazy_cnf)
         ) then (
         if for_model then
-          env.should_split <- true;
-
-        if not env.should_split then
-          raise Sat;
+          env.should_split <- true
+        else
+          raise Sat
       );
 
       if Options.get_enable_restarts () && not for_model
@@ -1859,10 +1873,15 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         match th_entailed env.tenv next with
         | None ->
           new_decision_level env;
-          if is_split next then
-            env.tdepth <- 0
-          else
+          if is_split next then (
+            is_splitting := true;
+            env.tdepth <- 0;
+            env.splits <- env.splits + 1;
+          ) else (
+            is_splitting := false;
             env.tdepth <- env.tdepth + 1;
+          );
+          (* Format.printf "%f split/decision ratio@." (float_of_int env.splits /. float_of_int env.decisions); *)
           let current_level = decision_level env in
           env.cpt_current_propagations <- 0;
           assert (next.var.level < 0);
@@ -1917,7 +1936,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       raise e
 
   let solve env =
-    env.should_split <- true;
     solve_aux ~for_model:false env
 
   let compute_concrete_model env =
