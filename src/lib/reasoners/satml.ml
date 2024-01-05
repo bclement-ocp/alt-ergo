@@ -161,8 +161,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   module Matoms = Atom.Map
 
-  type split = { atom : Atom.atom ; is_cs : bool ; origin : Th_util.lit_origin }
-
   let is_split (a : Atom.atom) =
     match Shostak.Literal.view a.lit with
     | LSem _ -> true
@@ -847,16 +845,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     end;
     let dead_part = Vec.size watched - !new_sz_w in
     Vec.shrink watched dead_part
-
-  let theory_split env (aview, is_cs, origin) =
-    let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
-    let atom, _ =
-      Atom.add_lit_atom env.hcons_env alit []
-    in
-    if atom.var.level >= 0 then
-      None
-    else
-      Some { atom ; is_cs ; origin }
 
   let do_case_split env origin =
     if Options.get_case_split_policy () == origin then
@@ -1765,23 +1753,33 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                   a
               | None -> (
                   let splits, tenv = Th.theory_decide ~for_model env.tenv in
-                  env.tenv <- tenv;
 
-                  let splits = List.filter_map (theory_split env) splits in
                   match splits with
-                  | split :: _ when not split.is_cs ->
-                    enqueue env split.atom (decision_level env) None;
-                    raise Exit (* FIXME *)
-                  | split :: _ when
-                      env.should_split
-                      && prefer_split split.origin env
-                    ->
+                  | [ (aview, is_cs, origin) ] ->
+                    let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
+                    let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
+                    if atom.var.level >= 0 then (
+                      env.tenv <- tenv;
+                      pick_branch_lit env
+                    ) else if is_cs then
+                      if env.should_split && prefer_split origin env then (
+                        env.tenv <- tenv;
+                        env.should_split <- false;
+                        atom
+                      ) else (
+                        ignore (Vheap.remove_min env.order);
+                        v.na
+                      )
+                    else (
+                      env.tenv <- tenv;
+                      enqueue env atom (decision_level env) None;
+                      raise Exit (* FIXME *)
+                    )
+                  | [] ->
                     env.should_split <- false;
-                    split.atom
-                  | _ ->
-                    env.should_split <- env.should_split && not (Lists.is_empty splits);
                     ignore (Vheap.remove_min env.order);
                     v.na
+                  | _ -> assert false
                 )
           )
         | exception Not_found ->
@@ -1795,19 +1793,25 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               a
           | None -> (
               let splits, tenv = Th.theory_decide ~for_model env.tenv in
-              env.tenv <- tenv;
 
-              let splits = List.filter_map (theory_split env) splits in
               match splits with
-              | split :: _ when not split.is_cs ->
-                enqueue env split.atom (decision_level env) None;
-                raise Exit (* FIXME *)
-              | split :: _ ->
-                env.should_split <- true;
-                split.atom
+              | [ (aview, is_cs, _) ] ->
+                env.tenv <- tenv;
+                let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
+                let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
+                if atom.var.level >= 0 then
+                  pick_branch_lit env
+                else if is_cs then (
+                  env.should_split <- true;
+                  atom
+                ) else (
+                  enqueue env atom (decision_level env) None;
+                  raise Exit
+                )
               | [] ->
                 env.should_split <- false;
                 raise Sat
+              | _ -> assert false
             )
 
     in
