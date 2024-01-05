@@ -1370,9 +1370,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       match learnt with
       | [] -> assert false
       | [(fuip : Atom.atom)] ->
-        assert (not (is_split fuip));
-        fuip.var.vpremise <- history;
-        enqueue env fuip 0 None
+        (* Note: [is_split fuip] might hold if we later learn that a split we
+           made was impossible (previously "SAT contradicts CS") *)
+        if not (is_split fuip) then (
+          fuip.var.vpremise <- history;
+          enqueue env fuip 0 None
+        )
       | fuip :: _ ->
         let name = Atom.fresh_lname () in
         let lclause =
@@ -1390,7 +1393,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           clause_bump_activity env lclause;
           let propag_lvl = best_propagation_level env lclause in
           enqueue env fuip propag_lvl (Some lclause)
-        );
+        ) else (
+          (* Do not change level of splits *)
+          enqueue env fuip curr_level (Some lclause)
+        )
     end;
     if not is_T_learn then begin
       var_decay_activity env;
@@ -1543,7 +1549,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           let blevel, learnt, history = conflict_analyze_aux env c max_lvl in
           if Options.get_debug_sat () then
             Printer.print_dbg
-              "@[<v 2>Theory cancel:@ %a@ %a@]"
+              "@[<v 2>Theory cancel:@ %a@ %a@]@."
               Atom.pr_clause c
               Fmt.(list ~sep:(any " \\/@ ") Atom.pr_atom |> hovbox ~indent:2) learnt;
           if Options.get_debug_sat () then (
@@ -1707,9 +1713,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
-  let prefer_split origin env =
+  let prefer_split at origin env =
     match origin with
-    | Th_util.CS (_, sz) -> Q.(div_2exp sz env.tdepth < ~$1)
+    | Th_util.CS (_, sz) -> Q.(div_2exp sz env.tdepth < ~$1 / ~$256)
     | _ -> true
 
   let pick_branch_lit ?(for_model = false) env =
@@ -1742,10 +1748,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           pick_branch_lit env
         | v -> (
             match th_entailed env.tenv v.na with
-            | Some _ ->
+            | Some _ when not split_only ->
               ignore (Vheap.remove_min env.order);
               v.na
-            | None ->
+            | _ ->
               match env.next_decision with
               | Some a ->
                 env.next_decision <- None;
@@ -1766,7 +1772,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                       env.tenv <- tenv;
                       pick_branch_lit env
                     ) else if is_cs then
-                      if split_only || prefer_split origin env then (
+                      if split_only || prefer_split atom origin env then (
                         env.tenv <- tenv;
                         atom
                       ) else if split_only then
@@ -1841,11 +1847,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       env.should_split <- false;
       propagate_and_stabilize env all_propagations conflictC !strat;
 
-      if not (env.should_split || !is_splitting) && (
-          env.nassign = nb_vars env ||
-          (Options.get_cdcl_tableaux_inst () &&
-           Matoms.is_empty env.lazy_cnf)
-        ) then (
+      if (* not (env.should_split || !is_splitting) && *) (
+        env.nassign = nb_vars env ||
+        (Options.get_cdcl_tableaux_inst () &&
+         Matoms.is_empty env.lazy_cnf)
+      ) then (
         if for_model then
           env.should_split <- true
         else
@@ -1883,7 +1889,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             is_splitting := false;
             env.tdepth <- env.tdepth + 1;
           );
-          (* Format.printf "%f split/decision ratio@." (float_of_int env.splits /. float_of_int env.decisions); *)
           let current_level = decision_level env in
           env.cpt_current_propagations <- 0;
           assert (next.var.level < 0);

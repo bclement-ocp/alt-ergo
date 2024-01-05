@@ -1164,10 +1164,12 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
                instantiation doesn't allow to backjump *)
             env.last_forced_normal <- env.last_forced_normal - 1
         in
-        if not updated then
+        if not updated then (
+          ignore @@ SAT.compute_concrete_model env.satml;
           update_model_and_return_unknown
             env (Options.get_last_interpretation ())
-            ~unknown_reason:Incomplete; (* may becomes ModelGen *)
+            ~unknown_reason:Incomplete (* may becomes ModelGen *)
+        );
         unsat_rec env ~first_call:false
 
       with
