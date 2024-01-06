@@ -1794,7 +1794,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             env.ssize <- Q.(env.ssize * sz)
                           | _ -> assert false );
       ) else
-        enqueue ~origin env atom (decision_level env) None;
+        enqueue ~origin env atom 0 None
     | [] -> raise Not_found
 
   let do_semantic_propagation env =
