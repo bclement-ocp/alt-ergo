@@ -138,8 +138,12 @@ let case_split env uf ~for_model =
   List.fast_sort
     (fun (_ ,_ , sz1) (_ ,_ , sz2) ->
        match sz1, sz2 with
-       | Th_util.CS (_ , sz1), Th_util.CS (_ , sz2) ->
-         Numbers.Q.compare sz1 sz2
+       | Th_util.CS (Th_arrays , sz1), Th_util.CS (Th_arrays , sz2) ->
+         Q.compare sz1 sz2
+       | CS (Th_arrays , _), CS (_ , _) -> -1
+       | CS (_ , _), CS (Th_arrays , _) -> 1
+       | CS (_ , sz1), CS (_ , sz2) ->
+         Q.compare sz1 sz2
        | _ -> assert false
     ) splits
 

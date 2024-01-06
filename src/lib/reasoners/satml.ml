@@ -1740,7 +1740,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     | Th_util.CS (_, sz) ->
       let total_size = Q.(sz * env.ssize) in
       if Q.(div sz ~$(env.tdepth) < ~$1 / ~$256) then (
-        Format.printf "new size: %a at depth %d@." Q.pp_print total_size env.tdepth;
+        if Options.get_debug_split () then
+          Printer.print_dbg "new size: %a at depth %d@." Q.pp_print total_size env.tdepth;
         true
       ) else false
     | _ -> assert false
@@ -1858,60 +1859,63 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       match !strat with
       | Auto -> (
-          let should_split =
-            match splits with
-            | (_, _, origin) :: _ when prefer_split has_prop_model origin env -> true
-            | _ -> has_prop_model && for_model
-          in
-          match next_boolean_decision env with
-          | v -> (
-              match th_entailed env.tenv v.na with
-              | Some (c, _) ->
-                ignore (Vheap.remove_min env.order);
-                (* right decision level will be set inside record_learnt_clause *)
-                record_learnt_clause env ~is_T_learn:true (decision_level env) c []
-              | None ->
-                match env.next_decision with
-                | Some a when a.var.level < 0 ->
-                  env.next_decision <- None;
-                  if Options.get_debug_split () then
-                    Printer.print_dbg "[satml] Forced decision at %d: %a@." (decision_level env) Atom.pr_atom a;
-                  make_decision env a
-                | _ ->
-                  env.next_decision <- None;
-                  if should_split then (
-                    env.pending_splits <- splits;
-                    env.tenv <- split_tenv;
-                    try perform_split env
-                    with Not_found ->
+          match next_guard env with
+          | g -> make_decision env g
+          | exception Not_found ->
+            let should_split =
+              match splits with
+              | (_, _, origin) :: _ when prefer_split has_prop_model origin env -> true
+              | _ -> has_prop_model && for_model
+            in
+            match next_boolean_decision env with
+            | v -> (
+                match th_entailed env.tenv v.na with
+                | Some (c, _) ->
+                  ignore (Vheap.remove_min env.order);
+                  (* right decision level will be set inside record_learnt_clause *)
+                  record_learnt_clause env ~is_T_learn:true (decision_level env) c []
+                | None ->
+                  match env.next_decision with
+                  | Some a when a.var.level < 0 ->
+                    env.next_decision <- None;
+                    if Options.get_debug_split () then
+                      Printer.print_dbg "[satml] Forced decision at %d: %a@." (decision_level env) Atom.pr_atom a;
+                    make_decision env a
+                  | _ ->
+                    env.next_decision <- None;
+                    if should_split then (
+                      env.pending_splits <- splits;
+                      env.tenv <- split_tenv;
+                      try perform_split env
+                      with Not_found ->
+                        if has_prop_model then
+                          raise Sat;
+
+                        ignore (Vheap.remove_min env.order);
+                        make_decision env v.na
+                    ) else (
                       if has_prop_model then
                         raise Sat;
 
+                      assert (not has_prop_model);
                       ignore (Vheap.remove_min env.order);
                       make_decision env v.na
-                  ) else (
-                    if has_prop_model then
-                      raise Sat;
+                    )
+              )
+            | exception Not_found ->
+              match env.next_decision with
+              | Some a when a.var.level < 0 ->
+                env.next_decision <- None;
+                make_decision env a
+              | _ ->
+                env.next_decision <- None;
+                if not should_split then
+                  raise Sat;
 
-                    assert (not has_prop_model);
-                    ignore (Vheap.remove_min env.order);
-                    make_decision env v.na
-                  )
-            )
-          | exception Not_found ->
-            match env.next_decision with
-            | Some a when a.var.level < 0 ->
-              env.next_decision <- None;
-              make_decision env a
-            | _ ->
-              env.next_decision <- None;
-              if not should_split then
-                raise Sat;
-
-              env.pending_splits <- splits;
-              env.tenv <- split_tenv;
-              try perform_split env
-              with Not_found -> raise Sat
+                env.pending_splits <- splits;
+                env.tenv <- split_tenv;
+                try perform_split env
+                with Not_found -> raise Sat
         )
       | Stop -> raise Stopped
       | Interactive f ->
