@@ -1833,11 +1833,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       in
 
       let splits, split_tenv =
-        match env.pending_splits with
-        | [] ->
-          let splits, tenv = Th.theory_decide ~for_model env.tenv in
-          intern_splits env splits, tenv
-        | _ -> env.pending_splits, env.tenv
+        (* TODO: be careful about optimisation and env updates!
+           do not resplit? *)
+        let splits, tenv = Th.theory_decide ~for_model env.tenv in
+        intern_splits env splits, tenv
       in
 
       let has_full_model = has_prop_model && Lists.is_empty splits in
