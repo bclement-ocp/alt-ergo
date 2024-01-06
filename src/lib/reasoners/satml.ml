@@ -413,7 +413,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       tdepth_queue : int Vec.t;
 
-      mutable should_split : bool;
+      mutable ssize : Q.t;
+
+      ssize_queue : Q.t Vec.t;
+
+      mutable pending_splits : (Atom.atom * bool * Th_util.lit_origin) list;
+
+      pending_splits_queue : (Atom.atom * bool * Th_util.lit_origin) list Vec.t;
 
       mutable next_decision : Atom.atom option ;
     }
@@ -533,7 +539,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       tdepth_queue = Vec.make 100 ~dummy:(-1);
 
-      should_split = false;
+      ssize = Q.one;
+
+      ssize_queue = Vec.make 100 ~dummy:Q.zero;
+
+      pending_splits = [];
+
+      pending_splits_queue = Vec.make 100 ~dummy:[];
 
       next_decision = None;
     }
@@ -579,10 +591,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     env.decisions <- env.decisions + 1;
     Vec.push env.trail_lim (Vec.size env.trail);
     Vec.push env.nassign_queue env.nassign;
+    Vec.push env.pending_splits_queue env.pending_splits;
     if Options.get_profiling() then
       Profiling.decision (decision_level env) "<none>";
     Vec.push env.tenv_queue env.tenv; (* save the current tenv *)
     Vec.push env.tdepth_queue env.tdepth;
+    Vec.push env.ssize_queue env.ssize;
     if Options.get_cdcl_tableaux () then begin
       Vec.push env.lazy_cnf_queue env.lazy_cnf;
       Vec.push env.relevants_queue env.relevants
@@ -659,9 +673,19 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   (* annule tout jusqu'a lvl *exclu*  *)
   let cancel_until env lvl =
-    if Options.get_debug_sat () then
+    if Options.get_debug_sat () then (
       Printer.print_dbg
         "[satml] cancel until %d (current is %d)@." lvl (decision_level env);
+      let model = Vec.to_list env.trail |> List.map fst in
+      let print fmt a =
+        Format.fprintf fmt " %f | %a@,"
+          (Atom.weight a)
+          Atom.pr_atom a
+      in
+      Printer.print_dbg
+        "@[<v 2>(2) satML's model:@,%a@]"
+        Fmt.(list ~sep:sp print) (List.rev model)
+    );
     cancel_ff_lvls_until env lvl;
     let repush = ref [] in
     if decision_level env > lvl then begin
@@ -685,7 +709,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       env.nassign <- Vec.get env.nassign_queue lvl;
       env.tenv <- Vec.get env.tenv_queue lvl; (* recover the right tenv *)
       env.tdepth <- Vec.get env.tdepth_queue lvl;
-      env.should_split <- false;
+      env.ssize <- Vec.get env.ssize_queue lvl;
+      env.pending_splits <- Vec.get env.pending_splits_queue lvl;
       env.next_decision <- None;
       if Options.get_cdcl_tableaux () then begin
         env.lazy_cnf <- Vec.get env.lazy_cnf_queue lvl;
@@ -694,7 +719,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Vec.shrink env.trail ((Vec.size env.trail) - env.qhead);
       Vec.shrink env.trail_lim ((Vec.size env.trail_lim) - lvl);
       Vec.shrink env.nassign_queue ((Vec.size env.nassign_queue) - lvl);
+      Vec.shrink env.pending_splits_queue ((Vec.size env.pending_splits_queue) - lvl);
       Vec.shrink env.tdepth_queue ((Vec.size env.tdepth_queue) - lvl);
+      Vec.shrink env.ssize_queue ((Vec.size env.ssize_queue) - lvl);
       Vec.shrink env.tenv_queue ((Vec.size env.tenv_queue) - lvl);
       if Options.get_cdcl_tableaux () then begin
         Vec.shrink
@@ -845,8 +872,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     Vec.shrink watched dead_part
 
   let do_case_split env origin =
-    if Options.get_case_split_policy () == origin then
-      env.should_split <- true;
     C_none
   (* TODO !!
      if true then C_none else
@@ -1099,8 +1124,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          (* if env.tdepth > 0 then *)
-          env.should_split <- true;
           C_none
         with Ex.Inconsistent (dep, _terms) ->
           (* XXX what to do with terms ? *)
@@ -1372,10 +1395,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       | [(fuip : Atom.atom)] ->
         (* Note: [is_split fuip] might hold if we later learn that a split we
            made was impossible (previously "SAT contradicts CS") *)
-        if not (is_split fuip) then (
-          fuip.var.vpremise <- history;
-          enqueue env fuip 0 None
-        )
+        fuip.var.vpremise <- history;
+        enqueue env fuip 0 None
       | fuip :: _ ->
         let name = Atom.fresh_lname () in
         let lclause =
@@ -1390,13 +1411,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         if not has_splits then (
           Vec.push env.learnts lclause;
           attach_clause env lclause;
-          clause_bump_activity env lclause;
-          let propag_lvl = best_propagation_level env lclause in
-          enqueue env fuip propag_lvl (Some lclause)
-        ) else (
-          (* Do not change level of splits *)
-          enqueue env fuip curr_level (Some lclause)
-        )
+          clause_bump_activity env lclause
+        );
+        let propag_lvl = best_propagation_level env lclause in
+        enqueue env fuip propag_lvl (Some lclause)
     end;
     if not is_T_learn then begin
       var_decay_activity env;
@@ -1538,10 +1556,13 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         match next_decision with
         | Some a ->
           assert (a.var.level = max_lvl);
-
+          if Options.get_debug_split () then
+            Printer.print_dbg "[satml] Koin at %d: @[%a@]@."
+              (decision_level env)
+              Fmt.(list ~sep:sp Atom.pr_atom) atoms;
           cancel_until env (max_lvl - 1);
           assert (not a.is_true && not a.neg.is_true);
-          env.next_decision <- Some a.neg
+          env.next_decision <- Some a
         | None ->
           let name = Atom.fresh_dname() in
           let c = Atom.make_clause name atoms vraie_form false c_hist in
@@ -1713,150 +1734,115 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             Some (clause_of_dep d a.Atom.neg)
           | None -> None
 
-  let prefer_split at origin env =
+  let prefer_split has_prop_model origin env =
     match origin with
-    | Th_util.CS (_, sz) -> Q.(div_2exp sz env.tdepth < ~$1 / ~$256)
-    | _ -> true
+    | Th_util.CS (Th_arrays, _) when has_prop_model -> true
+    | Th_util.CS (_, sz) ->
+      let total_size = Q.(sz * env.ssize) in
+      if Q.(div sz ~$(env.tdepth) < ~$1 / ~$256) then (
+        Format.printf "new size: %a at depth %d@." Q.pp_print total_size env.tdepth;
+        true
+      ) else false
+    | _ -> assert false
 
-  let pick_branch_lit ?(for_model = false) env =
-    let rec pick_branch_lit env =
-      (* The choice of the next literal to branch on is as follows:
+  (* Raises [Not_found] if there is no boolean decision to make *)
+  let rec next_boolean_decision env =
+    match Vheap.peek_min env.order with
+    | v when v.level >= 0 ->
+      assert (v.pa.is_true || v.na.is_true);
+      ignore (Vheap.remove_min env.order);
+      next_boolean_decision env
+    | v -> v
 
-         - If there are undecided guards, we must decide on the guards first.
-         - Otherwise, we first perform theory propagations (i.e.
-         - If there is a [next_decision], we pick that one (if still valid), but
-            we perform theory propagations first.
-         - If a split was requested ([should_split] is [true]), we want to
-            perform a split, but we perform theory propagations first.
-         - If no split was requested, we simply pick the next variable in order.
-      *)
-      if env.next_dec_guard < Vec.size env.increm_guards then
-        begin
-          let a = Vec.get env.increm_guards env.next_dec_guard in
-          (assert (not (a.neg.is_guard || a.neg.is_true)));
-          env.next_dec_guard <- env.next_dec_guard + 1;
-          a
-        end
-      else
-        let split_only =
-          Options.get_cdcl_tableaux_inst () && Matoms.is_empty env.lazy_cnf
-        in
-        match Vheap.peek_min env.order with
-        | v when v.level >= 0 ->
-          assert (v.pa.is_true || v.na.is_true);
+  let make_decision ?origin env a =
+    new_decision_level env;
+    if is_split a then (
+      env.tdepth <- 0 ;
+      env.splits <- env.splits + 1
+    ) else (
+      env.tdepth <- env.tdepth + 1
+    );
+    let current_level = decision_level env in
+    env.cpt_current_propagations <- 0;
+    assert (a.var.level < 0);
+    if Options.get_debug_sat () || (is_split a && Options.get_debug_split ()) then
+      Printer.print_dbg "[satml] decide at %d: %a" current_level Atom.pr_atom a;
+    enqueue ?origin env a current_level None
+
+  let intern_split env (aview, is_cs, origin) =
+    let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
+    let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
+    if atom.var.level >= 0 then
+      None
+    else
+      Some (atom, is_cs, origin)
+
+  let intern_splits env = List.filter_map (intern_split env)
+
+  (* Raises [Not_found] if there is no split to perform. *)
+  let rec perform_split env =
+    match env.pending_splits with
+    | (atom, _, _) :: splits when atom.var.level >= 0 ->
+      env.pending_splits <- splits;
+      perform_split env
+    | (atom, is_cs, origin) :: splits ->
+      env.pending_splits <- splits;
+      if is_cs then (
+        make_decision ~origin env atom;
+        ( match origin with Th_util.CS (_, sz) ->
+            env.ssize <- Q.(env.ssize * sz)
+                          | _ -> assert false );
+      ) else
+        enqueue ~origin env atom (decision_level env) None;
+    | [] -> raise Not_found
+
+  let do_semantic_propagation env =
+    match next_boolean_decision env with
+    | v -> (
+        match th_entailed env.tenv v.na with
+        | Some (c, _) ->
           ignore (Vheap.remove_min env.order);
-          pick_branch_lit env
-        | v -> (
-            match th_entailed env.tenv v.na with
-            | Some _ when not split_only ->
-              ignore (Vheap.remove_min env.order);
-              v.na
-            | _ ->
-              match env.next_decision with
-              | Some a ->
-                env.next_decision <- None;
-                if a.var.level >= 0 then (
-                  assert (a.is_true || a.neg.is_true);
-                  pick_branch_lit env
-                ) else
-                  a
-              | None ->
-                if env.should_split then (
-                  let splits, tenv = Th.theory_decide ~for_model env.tenv in
+          (* right decision level will be set inside record_learnt_clause *)
+          record_learnt_clause env ~is_T_learn:true (decision_level env) c [];
+          true
+        | None -> false
+      )
+    | exception Not_found -> false
 
-                  match splits with
-                  | (aview, is_cs, origin) :: _ ->
-                    let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
-                    let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
-                    if atom.var.level >= 0 then (
-                      env.tenv <- tenv;
-                      pick_branch_lit env
-                    ) else if is_cs then
-                      if split_only || prefer_split atom origin env then (
-                        env.tenv <- tenv;
-                        atom
-                      ) else if split_only then
-                        raise Sat
-                      else (
-                        env.should_split <- false;
-                        ignore (Vheap.remove_min env.order);
-                        v.na
-                      )
-                    else (
-                      env.tenv <- tenv;
-                      enqueue env atom (decision_level env) None;
-                      raise Exit (* FIXME *)
-                    )
-                  | [] ->
-                    env.should_split <- false;
-
-                    if split_only then
-                      raise Sat
-                    else (
-                      ignore (Vheap.remove_min env.order);
-                      v.na
-                    )
-                ) else (
-                  ignore (Vheap.remove_min env.order);
-                  v.na
-                )
-          )
-        | exception Not_found ->
-          match env.next_decision with
-          | Some a ->
-            env.next_decision <- None;
-            if a.var.level >= 0 then (
-              assert (a.is_true || a.neg.is_true);
-              pick_branch_lit env
-            ) else
-              a
-          | None -> (
-              let splits, tenv = Th.theory_decide ~for_model env.tenv in
-
-              match splits with
-              | (aview, is_cs, _) :: _ ->
-                env.tenv <- tenv;
-                let alit = Shostak.(Literal.make @@ LSem (L.make aview)) in
-                let atom, _ = Atom.add_lit_atom env.hcons_env alit [] in
-                if atom.var.level >= 0 then
-                  pick_branch_lit env
-                else if is_cs then (
-                  env.should_split <- false;
-                  atom
-                ) else (
-                  env.should_split <- false;
-                  enqueue env atom (decision_level env) None;
-                  raise Exit
-                )
-              | [] ->
-                env.should_split <- false;
-                raise Sat
-            )
-
-    in
-    (* If we are building a model, always try generating case splits. *)
-    if for_model then
-      env.should_split <- true;
-    pick_branch_lit env
+  let next_guard env =
+    if env.next_dec_guard < Vec.size env.increm_guards then
+      begin
+        let a = Vec.get env.increm_guards env.next_dec_guard in
+        (assert (not (a.neg.is_guard || a.neg.is_true)));
+        env.next_dec_guard <- env.next_dec_guard + 1;
+        a
+      end
+    else
+      raise Not_found
 
   let search ?(for_model = false) env strat n_of_conflicts n_of_learnts =
     let conflictC = ref 0 in
     env.starts <- env.starts + 1;
-    let is_splitting = ref true in
     while true do
-      env.should_split <- false;
       propagate_and_stabilize env all_propagations conflictC !strat;
 
-      if (* not (env.should_split || !is_splitting) && *) (
+      let has_prop_model =
         env.nassign = nb_vars env ||
-        (Options.get_cdcl_tableaux_inst () &&
-         Matoms.is_empty env.lazy_cnf)
-      ) then (
-        if for_model then
-          env.should_split <- true
-        else
-          raise Sat
-      );
+        (Options.get_cdcl_tableaux_inst () && Matoms.is_empty env.lazy_cnf)
+      in
+
+      let splits, split_tenv =
+        match env.pending_splits with
+        | [] ->
+          let splits, tenv = Th.theory_decide ~for_model env.tenv in
+          intern_splits env splits, tenv
+        | _ -> env.pending_splits, env.tenv
+      in
+
+      let has_full_model = has_prop_model && Lists.is_empty splits in
+
+      if has_full_model then
+        raise Sat;
 
       if Options.get_enable_restarts () && not for_model
          && n_of_conflicts >= 0 && !conflictC >= n_of_conflicts then begin
@@ -1870,35 +1856,71 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
          Vec.size env.learnts - nb_assigns env >= n_of_learnts then
         reduce_db();
 
-      try
-        let next =
-          match !strat with
-          | Auto -> pick_branch_lit ~for_model env
-          | Stop -> raise Stopped
-          | Interactive f ->
-            strat := Stop; f
-        in
-        match th_entailed env.tenv next with
-        | None ->
-          new_decision_level env;
-          if is_split next then (
-            is_splitting := true;
-            env.tdepth <- 0;
-            env.splits <- env.splits + 1;
-          ) else (
-            is_splitting := false;
-            env.tdepth <- env.tdepth + 1;
-          );
-          let current_level = decision_level env in
-          env.cpt_current_propagations <- 0;
-          assert (next.var.level < 0);
-          if Options.get_debug_sat () then
-            Printer.print_dbg "[satml] decide: %a" Atom.pr_atom next;
-          enqueue env next current_level None
-        | Some(c, _) ->
+      match !strat with
+      | Auto -> (
+          let should_split =
+            match splits with
+            | (_, _, origin) :: _ when prefer_split has_prop_model origin env -> true
+            | _ -> has_prop_model && for_model
+          in
+          match next_boolean_decision env with
+          | v -> (
+              match th_entailed env.tenv v.na with
+              | Some (c, _) ->
+                ignore (Vheap.remove_min env.order);
+                (* right decision level will be set inside record_learnt_clause *)
+                record_learnt_clause env ~is_T_learn:true (decision_level env) c []
+              | None ->
+                match env.next_decision with
+                | Some a when a.var.level < 0 ->
+                  env.next_decision <- None;
+                  if Options.get_debug_split () then
+                    Printer.print_dbg "[satml] Forced decision at %d: %a@." (decision_level env) Atom.pr_atom a;
+                  make_decision env a
+                | _ ->
+                  env.next_decision <- None;
+                  if should_split then (
+                    env.pending_splits <- splits;
+                    env.tenv <- split_tenv;
+                    try perform_split env
+                    with Not_found ->
+                      if has_prop_model then
+                        raise Sat;
+
+                      ignore (Vheap.remove_min env.order);
+                      make_decision env v.na
+                  ) else (
+                    if has_prop_model then
+                      raise Sat;
+
+                    assert (not has_prop_model);
+                    ignore (Vheap.remove_min env.order);
+                    make_decision env v.na
+                  )
+            )
+          | exception Not_found ->
+            match env.next_decision with
+            | Some a when a.var.level < 0 ->
+              env.next_decision <- None;
+              make_decision env a
+            | _ ->
+              env.next_decision <- None;
+              if not should_split then
+                raise Sat;
+
+              env.pending_splits <- splits;
+              env.tenv <- split_tenv;
+              try perform_split env
+              with Not_found -> raise Sat
+        )
+      | Stop -> raise Stopped
+      | Interactive f ->
+        strat := Stop;
+        match th_entailed env.tenv f with
+        | None -> make_decision env f
+        | Some (c, _) ->
+          (* right decision level will be set inside record_learnt_clause *)
           record_learnt_clause env ~is_T_learn:true (decision_level env) c []
-      (* right decision level will be set inside record_learnt_clause *)
-      with Exit -> ()
     done
 
   (* unused --

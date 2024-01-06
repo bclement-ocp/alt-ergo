@@ -1166,9 +1166,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         in
         if not updated then (
           ignore @@ SAT.compute_concrete_model env.satml;
-          update_model_and_return_unknown
-            env (Options.get_last_interpretation ())
-            ~unknown_reason:Incomplete (* may becomes ModelGen *)
+          if not (instantiation env Auto dec_lvl) then
+            update_model_and_return_unknown
+              env (Options.get_last_interpretation ())
+              ~unknown_reason:Incomplete (* may becomes ModelGen *)
         );
         unsat_rec env ~first_call:false
 
