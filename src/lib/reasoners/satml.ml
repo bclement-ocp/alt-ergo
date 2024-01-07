@@ -1396,6 +1396,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         (* Note: [is_split fuip] might hold if we later learn that a split we
            made was impossible (previously "SAT contradicts CS") *)
         fuip.var.vpremise <- history;
+        if Options.get_debug_split () && is_split fuip then
+          Printer.print_dbg "[satml] Forced split: %a@." Atom.pr_atom fuip;
         enqueue env fuip 0 None
       | fuip :: _ ->
         let name = Atom.fresh_lname () in
@@ -1568,7 +1570,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           let c = Atom.make_clause name atoms vraie_form false c_hist in
           c.removed <- true;
           let blevel, learnt, history = conflict_analyze_aux env c max_lvl in
-          if Options.get_debug_sat () then
+          if Options.get_debug_sat () || (is_semantic_level && Options.get_debug_split ()) then
             Printer.print_dbg
               "@[<v 2>Theory cancel:@ %a@ %a@]@."
               Atom.pr_clause c

@@ -389,7 +389,7 @@ let case_split env _uf ~for_model:_ =
     (Numbers.Q.mult two env.size_splits) (max_split ()) <= 0  ||
     Numbers.Q.sign  (max_split ()) < 0 then*)
   try
-    let a = LR.neg (LRset.choose env.split) in
+    let a = (LRset.choose env.split) in
     Debug.case_split a;
     [LR.view a, true, Th_util.CS (Th_util.Th_arrays, two)]
   with Not_found ->
