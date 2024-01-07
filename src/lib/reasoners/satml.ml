@@ -1736,7 +1736,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   let prefer_split has_prop_model origin env =
     match origin with
-    | Th_util.CS (Th_arrays, _) when has_prop_model -> true
+    | Th_util.CS ((Th_arrays | Th_sum), _) when has_prop_model -> true
     | Th_util.CS (_, sz) ->
       let total_size = Q.(sz * env.ssize) in
       if Q.(div sz ~$(env.tdepth) < ~$1 / ~$256) then (
