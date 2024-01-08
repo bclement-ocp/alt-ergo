@@ -45,7 +45,7 @@ module type SAT_ML = sig
   type th
   type t
 
-  val solve : t -> unit
+  val solve : ?deep:bool -> t -> unit
 
   val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t
 

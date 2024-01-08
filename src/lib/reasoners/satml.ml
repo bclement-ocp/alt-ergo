@@ -90,7 +90,7 @@ module type SAT_ML = sig
   type th
   type t
 
-  val solve : t -> unit
+  val solve : ?deep:bool -> t -> unit
 
   val compute_concrete_model : t -> Models.t Lazy.t * Objective.Model.t
 
@@ -1823,7 +1823,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     else
       raise Not_found
 
-  let search ?(for_model = false) env strat n_of_conflicts n_of_learnts =
+  let search ?(deep = false) ?(for_model = false) env strat n_of_conflicts n_of_learnts =
+    let deep = deep || for_model in
     let conflictC = ref 0 in
     env.starts <- env.starts + 1;
     while true do
@@ -1866,7 +1867,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             let should_split =
               match splits with
               | (_, _, origin) :: _ when prefer_split has_prop_model origin env -> true
-              | _ -> has_prop_model && for_model
+              | _ -> has_prop_model && deep
             in
             match next_boolean_decision env with
             | v -> (
@@ -1946,14 +1947,14 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
      check_vec env.learnts
   *)
 
-  let solve_aux ~for_model env =
+  let solve_aux ~deep ~for_model env =
     if env.is_unsat then raise (Unsat env.unsat_core);
     let n_of_conflicts = ref (Atom.to_float env.restart_first) in
     let n_of_learnts =
       ref ((Atom.to_float (nb_clauses env)) *. env.learntsize_factor) in
     try
       while true do
-        (try search ~for_model env (ref Auto)
+        (try search ~deep ~for_model env (ref Auto)
                (Atom.to_int !n_of_conflicts) (Atom.to_int !n_of_learnts);
          with Restart -> ());
         n_of_conflicts := !n_of_conflicts *. env.restart_inc;
@@ -1969,12 +1970,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       (* check_unsat_core cl; *)
       raise e
 
-  let solve env =
-    solve_aux ~for_model:false env
+  let solve ?(deep = false) env =
+    solve_aux ~deep ~for_model:false env
 
   let compute_concrete_model env =
     try
-      solve_aux ~for_model:true env;
+      solve_aux ~deep:true ~for_model:true env;
       assert false
     with Sat -> Th.compute_concrete_model env.tenv
 

@@ -1165,7 +1165,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
             env.last_forced_normal <- env.last_forced_normal - 1
         in
         if not updated then (
-          ignore @@ SAT.compute_concrete_model env.satml;
+          ( try SAT.solve ~deep:true env.satml with Satml.Sat -> () );
           if not (instantiation env Auto dec_lvl) then
             update_model_and_return_unknown
               env (Options.get_last_interpretation ())
