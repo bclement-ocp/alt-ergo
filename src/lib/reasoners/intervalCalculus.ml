@@ -90,7 +90,7 @@ let is_alien x =
 
 module SimVar = struct
   type t = X.r
-  let compare = X.hash_cmp
+  let compare = X.str_cmp
   let is_int r = X.type_info r == Ty.Tint
   let print fmt x =
     if is_alien x then fprintf fmt "%a" X.print x
