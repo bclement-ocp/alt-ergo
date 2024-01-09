@@ -33,7 +33,6 @@ module Ex = Explanation
 module Sy = Symbols
 module X = Shostak.Combine
 module L = Xliteral
-module Congruence = Rel_utils.Congruence
 
 (* Currently we only compute, but in the future we may want to perform the same
    simplifications as in [Bitv.make]. We currently don't, because we don't
@@ -111,9 +110,6 @@ module Domains : sig
 
       Use this to ensure that the representation is always normalized.
 
-      [v] must have an existing associated domain (possibly unconstrained)
-      before calling [subst]. Call [update] beforehand.
-
       The explanation [ex] justifies the equality [p = v].
 
       @raise Bitlist.Inconsistent if this causes any domain in [d] to become
@@ -131,7 +127,12 @@ module Domains : sig
 end = struct
   type t =
     { bitlists : Bitlist.t MX.t
-    (** Mapping from semantic values to their bitlist domain. *)
+    (** Mapping from semantic values to their bitlist domain.
+
+        Note: this mapping only contains domain for leaves (i.e. uninterpreted
+        terms or AC symbols); domains associated with more complex semantic
+        values are rebuilt on-the-fly using the structure of said semantic
+        values. *)
     ; changed : SX.t
     (** Elements whose domain has changed since last propagation. *)
     }
@@ -144,7 +145,7 @@ end = struct
       ppf t.bitlists
   let empty = { bitlists = MX.empty ; changed = SX.empty }
 
-  let update ex r t bl =
+  let update_leaf ex r t bl =
     let changed = ref false in
     let bitlists =
       MX.update r (function
@@ -171,45 +172,67 @@ end = struct
     let changed = if !changed then SX.add r t.changed else t.changed in
     { changed; bitlists }
 
-  let get r t =
+  let update_signed ex { Bitv.value; negated } t bl =
+    let bl = if negated then Bitlist.lognot bl else bl in
+    update_leaf ex value t bl
+
+  let update ex r t bl =
+    fst @@ List.fold_left (fun (t, bl) { Bitv.bv; sz } ->
+        (* Extract the bitlist associated with the current component *)
+        let mid = Bitlist.width bl - sz in
+        let bl_tail =
+          if mid = 0 then Bitlist.empty else
+            Bitlist.extract bl 0 (mid - 1)
+        in
+        let bl = Bitlist.extract bl mid (Bitlist.width bl - 1) in
+
+        match bv with
+        | Bitv.Cte z ->
+          (* Nothing to update, but still check for consistency! *)
+          ignore @@ Bitlist.intersect bl (Bitlist.exact sz z Ex.empty) ex;
+          t, bl_tail
+        | Other r -> update_signed ex r t bl, bl_tail
+        | Ext (r, r_size, i, j) ->
+          (* r<i, j> = bl -> r = ?^(r_size - j - 1) @ bl @ ?^i *)
+          assert (i + r_size - j - 1 + Bitlist.width bl = r_size);
+          let hi = Bitlist.unknown (r_size - j - 1) Ex.empty in
+          let lo = Bitlist.unknown i Ex.empty in
+          update_signed ex r t Bitlist.(hi @ bl @ lo), bl_tail
+      ) (t, bl) (Shostak.Bitv.embed r)
+
+  let get_leaf r t =
     try MX.find r t.bitlists with
     | Not_found ->
       match X.type_info r with
       | Tbitv n -> Bitlist.unknown n Explanation.empty
       | _ -> assert false
 
+  let get_signed { Bitv.value; negated } t =
+    let bl = get_leaf value t in
+    if negated then Bitlist.lognot bl else bl
+
+  let get r t =
+    List.fold_left (fun bl { Bitv.bv; sz } ->
+        Bitlist.concat bl @@
+        match bv with
+        | Bitv.Cte z -> Bitlist.exact sz z Ex.empty
+        | Other r -> get_signed r t
+        | Ext (r, _r_size, i, j) -> Bitlist.extract (get_signed r t) i j
+      ) Bitlist.empty (Shostak.Bitv.embed r)
+
   let subst ex rr nrr t =
     match MX.find rr t.bitlists with
     | bl ->
-      let has_changed = ref (SX.mem rr t.changed) in
-      let bitlists =
-        MX.update nrr (function
-            | Some bl' as o ->
-              let bl'' = Bitlist.intersect bl bl' ex in
-              (* Keep simpler explanations, and don't loop adding the domain to
-                 the changed set infinitely. *)
-              if Bitlist.equal bl' bl'' then
-                o
-              else (
-                has_changed := true;
-                if Options.get_debug_bitv () then
-                  Printer.print_dbg
-                    ~module_name:"Bitv_rel" ~function_name:"Domain.subst"
-                    "domain shrunk for %a: %a -> %a"
-                    X.print nrr Bitlist.pp bl' Bitlist.pp bl'';
-                Some (Bitlist.intersect bl bl' ex)
-              )
-            | None ->
-              (* We require that [nrr] has a domain before calling [subst]. *)
-              Printer.print_err
-                "Bitv_rel: substituting %a -> %a without domain"
-                X.print rr X.print nrr;
-              assert false
-          ) @@ MX.remove rr t.bitlists
+      (* Note: even if [rr] had changed its domain, we don't need to keep that
+         information because if the constraints that used to apply to [rr] were
+         not already valid, they will be marked as fresh in the [Constraints.t]
+         after substitution there and propagated already. *)
+      let t =
+        { changed = SX.remove rr t.changed
+        ; bitlists = MX.remove rr t.bitlists
+        }
       in
-      let changed = SX.remove rr t.changed in
-      let changed = if !has_changed then SX.add nrr changed else changed in
-      { changed ; bitlists }
+      update ex nrr t bl
     | exception Not_found -> t
 
   let choose_changed t =
@@ -220,6 +243,20 @@ end = struct
 end
 
 module Constraint : sig
+  include Rel_utils.Constraint with type domain = Domains.t
+
+  val bvand : ex:Ex.t -> X.r -> X.r -> X.r -> t
+  (** [bvand ~ex x y z] is the constraint [x = y & z] *)
+
+  val bvor : ex:Ex.t -> X.r -> X.r -> X.r -> t
+  (** [bvor ~ex x y z] is the constraint [x = y | z] *)
+
+  val bvxor : ex:Ex.t -> X.r -> X.r -> X.r -> t
+  (** [bvxor ~ex x y z] is the constraint [x ^ y ^ z = 0] *)
+
+  val bvnot : ex:Ex.t -> X.r -> X.r -> t
+  (** [bvnot ~ex x y] is the constraint [x = not y] *)
+end = struct
   type repr =
     | Band of X.r * X.r * X.r
     (** [Band (x, y, z)] represents [x = y & z] *)
@@ -229,50 +266,6 @@ module Constraint : sig
     (** [Bxor {x1, ..., xn}] represents [x1 ^ ... ^ xn = 0] *)
     | Bnot of X.r * X.r
     (** [Bnot (x, y)] represents [x = not y] *)
-
-  type tagged_repr
-
-  val hcons : repr -> tagged_repr
-  (** Internalize the constraint representation.
-
-      This uses hash-consing and some simple normalization to de-duplicate
-      constraints. *)
-
-  val tag : tagged_repr -> int
-  (** Returns the unique tag associated with the tagged repr. *)
-
-  type t = { repr : tagged_repr ; ex : Ex.t }
-  (** The type of bit-vector constraints.
-
-      Bit-vector constraints contains semantic values / term representatives of
-      type [X.r]. We maintain the invariant that the semantic values used inside
-      the constraints are *class representatives* i.e. normal forms wrt the `Uf`
-      module, i.e. constraints have a normalized representation. Use `subst` to
-      ensure normalization. *)
-
-  val pp : t Fmt.t
-  (** Pretty-printer for constraints. *)
-
-  val subst : Ex.t -> X.r -> X.r -> t -> t
-  (** [subst ex p v cs] replaces all the instaces of [p] with [v] in the
-      constraint.
-
-      Use this to ensure that the representation is always normalized.
-
-      The explanation [ex] justifies the equality [p = v]. *)
-
-  val fold_deps : (X.r -> 'a -> 'a) -> t -> 'a -> 'a
-  (** [fold_deps f c acc] accumulates [f] over the arguments of [c]. *)
-
-  val propagate : t -> Domains.t -> Domains.t
-  (** [propagate c dom] propagates the constraints [c] in [d] and returns the
-      new domains. *)
-end = struct
-  type repr =
-    | Band of X.r * X.r * X.r
-    | Bor of X.r * X.r * X.r
-    | Bxor of SX.t
-    | Bnot of X.r * X.r
 
   let normalize_repr = function
     | Band (x, y, z) when X.hash_cmp y z > 0 -> Band (x, z, y)
@@ -321,8 +314,6 @@ end = struct
       );
       tagged
 
-  let tag { tag; _ } = tag
-
   let pp_repr ppf = function
     | Band (x, y, z) ->
       Fmt.pf ppf "%a & %a = %a" X.print y X.print z X.print x
@@ -341,31 +332,34 @@ end = struct
 
   let subst_repr rr nrr = function
     | Band (x, y, z) ->
-      let x = if X.equal x rr then nrr else x
-      and y = if X.equal y rr then nrr else y
-      and z = if X.equal z rr then nrr else z in
+      let x = X.subst rr nrr x
+      and y = X.subst rr nrr y
+      and z = X.subst rr nrr z in
       Band (x, y, z)
     | Bor (x, y, z) ->
-      let x = if X.equal x rr then nrr else x
-      and y = if X.equal y rr then nrr else y
-      and z = if X.equal z rr then nrr else z in
+      let x = X.subst rr nrr x
+      and y = X.subst rr nrr y
+      and z = X.subst rr nrr z in
       Bor (x, y, z)
     | Bxor xs ->
       Bxor (
         SX.fold (fun r xs ->
-            let r = if X.equal r rr then nrr else r in
+            let r = X.subst rr nrr r in
             if SX.mem r xs then SX.remove r xs else SX.add r xs
           ) xs SX.empty
       )
     | Bnot (x, y) ->
-      let x = if X.equal x rr then nrr else x
-      and y = if X.equal y rr then nrr else y in
+      let x = X.subst rr nrr x
+      and y = X.subst rr nrr y in
       Bnot (x, y)
 
   (* The explanation justifies why the constraint holds. *)
   type t = { repr : tagged_repr ; ex : Ex.t }
 
   let pp ppf { repr; _ } = pp_repr ppf repr.repr
+
+  let compare { repr = r1; _ } { repr = r2; _ } =
+    Int.compare r1.tag r2.tag
 
   let subst ex rr nrr c =
     { repr = hcons @@ subst_repr rr nrr c.repr.repr ; ex = Ex.union ex c.ex }
@@ -382,6 +376,13 @@ end = struct
       let acc = f x acc in
       let acc = f y acc in
       acc
+
+  let fold_leaves f c acc =
+    fold_deps (fun r acc ->
+        List.fold_left (fun acc r -> f r acc) acc (X.leaves r)
+      ) c acc
+
+  type domain = Domains.t
 
   let propagate { repr; ex } dom =
     Steps.incr CP;
@@ -444,135 +445,20 @@ end = struct
       let dom = Domains.update ex x dom @@ Bitlist.lognot dy in
       let dom = Domains.update ex y dom @@ Bitlist.lognot dx in
       dom
+
+  let make ?(ex = Ex.empty) repr = { repr = hcons repr ; ex }
+
+  let bvand ~ex x y z = make ~ex @@ Band (x, y, z)
+  let bvor ~ex x y z = make ~ex @@ Bor (x, y, z)
+  let bvxor ~ex x y z =
+    let xs = SX.singleton x in
+    let xs = if SX.mem y xs then SX.remove y xs else SX.add y xs in
+    let xs = if SX.mem z xs then SX.remove z xs else SX.add z xs in
+    make ~ex @@ Bxor xs
+  let bvnot ~ex x y = make ~ex @@ Bnot (x, y)
 end
 
-module Constraints : sig
-  type t
-  (** The type of constraint sets. A constraint sets records a set of
-      constraints that applies to semantic values, and remembers which
-      constraints are associated with each semantic values.
-
-      It is used to only propagate constraints involving semantic values whose
-      associated domain has changed.
-
-      The constraint sets are expected to keep track of *class representatives*,
-      i.e.  normal forms wrt the `Uf` module, in which case we say the
-      constraint set is *normalized*. Use `subst` to ensure normalization. *)
-
-  val pp : t Fmt.t
-  (** Pretty-printer for constraint sets. *)
-
-  val empty : t
-  (** Returns an empty constraint set. *)
-
-  val subst : Ex.t -> X.r -> X.r -> t -> t
-  (** [subst ex p v cs] replaces all the instances of [p] with [v] in the
-      constraints.
-
-      Use this to ensure that the representation is always normalized.
-
-      The explanation [ex] justifies the equality [p = v]. *)
-
-  val add : t -> Constraint.t -> t
-  (** [add c cs] adds the constraint [c] to [cs]. *)
-
-  val fold_fresh : (Constraint.t -> 'a -> 'a) -> t -> 'a -> t * 'a
-  (** [fold_fresh f cs acc] folds [f] over the fresh constraints in [cs].
-
-      Fresh constraints are constraints that were never propagated yet. *)
-
-  val propagate : t -> X.r -> Domains.t -> Domains.t
-  (** [propagate cs r dom] propagates the constraints associated with [r] in the
-      constraint set [cs] and returns the new domain map after propagation. *)
-end = struct
-  module IM = Util.MI
-
-  module CS = Set.Make(struct
-      type t = Constraint.t
-
-      let compare t1 t2 =
-        Int.compare Constraint.(tag t1.repr) Constraint.(tag t2.repr)
-    end)
-
-  type t = {
-    cs_set : CS.t ;
-    (*** All the constraints currently active *)
-    cs_map : CS.t MX.t ;
-    (*** Mapping from semantic values to the constraints that involves them *)
-    fresh : CS.t ;
-    (*** Fresh constraints that have never been propagated *)
-  }
-
-  let pp ppf { cs_set; cs_map = _ ; fresh = _ } =
-    Fmt.(
-      braces @@ hvbox @@
-      iter ~sep:semi CS.iter @@
-      box ~indent:2 @@ braces @@
-      Constraint.pp
-    ) ppf cs_set
-
-  let empty =
-    { cs_set = CS.empty
-    ; cs_map = MX.empty
-    ; fresh = CS.empty }
-
-  let cs_add cs r cs_map =
-    MX.update r (function
-        | Some css -> Some (CS.add cs css)
-        | None -> Some (CS.singleton cs)
-      ) cs_map
-
-  let cs_remove cs r cs_map =
-    MX.update r (function
-        | Some css ->
-          let css = CS.remove cs css in
-          if CS.is_empty css then None else Some css
-        | None ->
-          (* Can happen if the same argument is repeated *)
-          None
-      ) cs_map
-
-  let subst ex rr nrr bcs =
-    match MX.find rr bcs.cs_map with
-    | ids ->
-      let cs_map, cs_set, fresh =
-        CS.fold (fun cs (cs_map, cs_set, fresh) ->
-            let fresh = CS.remove cs fresh in
-            let cs_set = CS.remove cs cs_set in
-            let cs_map = Constraint.fold_deps (cs_remove cs) cs cs_map in
-            let cs' = Constraint.subst ex rr nrr cs in
-            if CS.mem cs' cs_set then
-              cs_map, cs_set, fresh
-            else
-              let cs_set = CS.add cs' cs_set in
-              let cs_map = Constraint.fold_deps (cs_add cs') cs' cs_map in
-              (cs_map, cs_set, CS.add cs' fresh)
-          ) ids (bcs.cs_map, bcs.cs_set, bcs.fresh)
-      in
-      assert (not (MX.mem rr cs_map));
-      { cs_set ; cs_map ; fresh }
-    | exception Not_found -> bcs
-
-  let add bcs c =
-    if CS.mem c bcs.cs_set then
-      bcs
-    else
-      let cs_set = CS.add c bcs.cs_set in
-      let cs_map =
-        Constraint.fold_deps (cs_add c) c bcs.cs_map
-      in
-      let fresh = CS.add c bcs.fresh in
-      { cs_set ; cs_map ; fresh }
-
-  let fold_fresh f bcs acc =
-    let acc = CS.fold f bcs.fresh acc in
-    { bcs with fresh = CS.empty }, acc
-
-  let propagate bcs r dom =
-    match MX.find r bcs.cs_map with
-    | cs -> CS.fold Constraint.propagate cs dom
-    | exception Not_found -> dom
-end
+module Constraints = Rel_utils.Constraints_Make(Constraint)
 
 let extract_constraints bcs uf r t =
   match E.term_view t with
@@ -580,38 +466,20 @@ let extract_constraints bcs uf r t =
      without needing a round-trip through Uf *)
   | { f = Op BVnot; xs = [ x ] ; _ } ->
     let rx, exx = Uf.find uf x in
-    Constraints.add bcs @@
-    { repr = Constraint.hcons @@ Bnot (r, rx) ; ex = exx }
+    Constraints.add bcs @@ Constraint.bvnot ~ex:exx r rx
   | { f = Op BVand; xs = [ x; y ]; _ } ->
     let rx, exx = Uf.find uf x
     and ry, exy = Uf.find uf y in
-    Constraints.add bcs @@
-    { repr = Constraint.hcons @@ Band (r, rx, ry) ; ex = Ex.union exx exy }
+    Constraints.add bcs @@ Constraint.bvand ~ex:(Ex.union exx exy) r rx ry
   | { f = Op BVor; xs = [ x; y ]; _ } ->
     let rx, exx = Uf.find uf x
     and ry, exy = Uf.find uf y in
-    Constraints.add bcs @@
-    { repr = Constraint.hcons @@ Bor (r, rx, ry) ; ex = Ex.union exx exy }
+    Constraints.add bcs @@ Constraint.bvor ~ex:(Ex.union exx exy) r rx ry
   | { f = Op BVxor; xs = [ x; y ]; _ } ->
     let rx, exx = Uf.find uf x
     and ry, exy = Uf.find uf y in
-    let xs = SX.singleton r in
-    let xs = if SX.mem rx xs then SX.remove rx xs else SX.add rx xs in
-    let xs = if SX.mem ry xs then SX.remove ry xs else SX.add ry xs in
-    Constraints.add bcs @@
-    { repr = Constraint.hcons @@ Bxor xs ; ex = Ex.union exx exy }
+    Constraints.add bcs @@ Constraint.bvxor ~ex:(Ex.union exx exy) r rx ry
   | _ -> bcs
-
-(** [abstract_bitlist r ex] builds a bitlist representation of the semantic
-    bit-vector value [r] *)
-let abstract_bitlist =
-  let rec aux = function
-    | [] -> Bitlist.empty
-    | { Bitv.bv = Bitv.Cte n; sz } :: bs ->
-      Bitlist.(exact sz n Ex.empty @ aux bs)
-    | { sz; bv = (Other _ | Ext _) } :: bs ->
-      Bitlist.(unknown sz Ex.empty @ aux bs)
-  in fun bs -> Bitlist.add_explanation (aux bs)
 
 let rec mk_eq ex lhs w z =
   match lhs with
@@ -669,16 +537,13 @@ let add_eqs =
 let propagate =
   let rec propagate changed bcs dom =
     match Domains.choose_changed dom with
-    | r, dom -> (
-        propagate (SX.add r changed) bcs @@
-        Constraints.propagate bcs r dom
-      )
+    | r, dom ->
+      propagate (SX.add r changed) bcs @@
+      Constraints.propagate bcs r dom
     | exception Not_found -> changed, dom
   in
   fun bcs dom ->
-    let bcs, dom =
-      Constraints.fold_fresh Constraint.propagate bcs dom
-    in
+    let bcs, dom = Constraints.propagate_fresh bcs dom in
     let changed, dom = propagate SX.empty bcs dom in
     SX.fold (fun r acc ->
         add_eqs acc (Shostak.Bitv.embed r) (Domains.get r dom)
@@ -688,57 +553,54 @@ type t =
   { delayed : Rel_utils.Delayed.t
   ; domain : Domains.t
   ; constraints : Constraints.t
-  ; congruence : Congruence.t
   ; size_splits : Q.t }
 
 let empty _ =
   { delayed = Rel_utils.Delayed.create dispatch
   ; domain = Domains.empty
   ; constraints = Constraints.empty
-  ; congruence = Congruence.empty
   ; size_splits = Q.one }
 
 let assume env uf la =
   let delayed, result = Rel_utils.Delayed.assume env.delayed uf la in
-  let (congruence, domain, constraints, eqs, size_splits) =
+  let (domain, constraints, eqs, size_splits) =
     try
-      let (congruence, (constraints, domain), size_splits) =
-        List.fold_left (fun (cgr, (bcs, dom), ss) (a, _root, ex, orig) ->
+      let ((constraints, domain), size_splits) =
+        List.fold_left (fun ((bcs, dom), ss) (a, _root, ex, orig) ->
             let ss =
               match orig with
               | Th_util.CS (Th_bitv, n) -> Q.(ss * n)
               | _ -> ss
             in
+            let is_1bit r =
+              match X.type_info r with
+              | Tbitv 1 -> true
+              | _ -> false
+            in
             match a, orig with
             | L.Eq (rr, nrr), Subst when is_bv_r rr ->
-              let cc, acc =
-                Congruence.subst rr nrr cgr (fun rr nrr (bcs, dom) ->
-                    let bl =
-                      abstract_bitlist (Shostak.Bitv.embed nrr) Ex.empty
-                    in
-                    let dom = Domains.update Ex.empty nrr dom bl in
-                    ( Constraints.subst ex rr nrr bcs
-                    , Domains.subst ex rr nrr dom )
-                  ) (bcs, dom)
-              in (cc, acc, ss)
-            | L.Distinct (false, [rr; nrr]), _ when Stdlib.(X.type_info rr = Ty.Tbitv 1) ->
-              (* We don't support [distinct] in general yet, but we must
+              let dom = Domains.subst ex rr nrr dom in
+              let bcs = Constraints.subst ex rr nrr bcs in
+              ((bcs, dom), ss)
+            | L.Distinct (false, [rr; nrr]), _ when is_1bit rr ->
+              (* We don't (yet) support [distinct] in general, but we must
                  support it for case splits to avoid looping.
 
-                 Note that for 1-bit vectors (i.e. booleans), we have `x <> y`
-                 iff `x = not y`. *)
-              let drr = abstract_bitlist (Shostak.Bitv.embed rr) Ex.empty in
-              let dnrr = abstract_bitlist (Shostak.Bitv.embed nrr) Ex.empty in
-              let dom = Domains.update Ex.empty rr dom drr in
-              let dom = Domains.update Ex.empty nrr dom dnrr in
+                 We are a bit more general and support it for 1-bit vectors, for
+                 which `distinct` can be expressed using `bvnot`.
+
+                 Note that we are not guaranteed that the arguments are already
+                 in normal form! *)
+              let rr, exrr = Uf.find_r uf rr in
+              let nrr, exnrr = Uf.find_r uf nrr in
+              let ex = Ex.union ex (Ex.union exrr exnrr) in
               let bcs =
-                Constraints.add bcs @@
-                { repr = Constraint.hcons @@ Bnot (rr, nrr)  ; ex }
+                Constraints.add bcs @@ Constraint.bvnot ~ex rr nrr
               in
-              (cgr, (bcs, dom), ss)
-            | _ -> (cgr, (bcs, dom), ss)
+              ((bcs, dom), ss)
+            | _ -> ((bcs, dom), ss)
           )
-          (env.congruence, (env.constraints, env.domain), env.size_splits)
+          ((env.constraints, env.domain), env.size_splits)
           la
       in
       let eqs, constraints, domain = propagate constraints domain in
@@ -750,7 +612,7 @@ let assume env uf la =
           ~module_name:"Bitv_rel" ~function_name:"assume"
           "bitlist constraints: @[%a@]" Constraints.pp constraints;
       );
-      (congruence, domain, constraints, eqs, size_splits)
+      (domain, constraints, eqs, size_splits)
     with Bitlist.Inconsistent ex ->
       raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
   in
@@ -760,7 +622,7 @@ let assume env uf la =
   let result =
     { result with assume = List.rev_append assume result.assume }
   in
-  { delayed ; constraints ; domain ; congruence ; size_splits }, result
+  { delayed ; constraints ; domain ; size_splits }, result
 
 let query _ _ _ = None
 
@@ -769,35 +631,51 @@ let case_split env _uf ~for_model =
     []
   else
     (* Look for representatives with minimal, non-fully known, domain size.
+
+       We first look among the constrained variables, then if there are no
+       constrained variables, all the remaining variables.
+
        [nunk] is the number of unknown bits. *)
+    let f_acc r bl acc =
+      let nunk = Bitlist.num_unknown bl in
+      if nunk = 0 then
+        acc
+      else
+        match acc with
+        | Some (nunk', _) when nunk > nunk' -> acc
+        | Some (nunk', xs) when nunk = nunk' ->
+          Some (nunk', SX.add r xs)
+        | _ -> Some (nunk, SX.singleton r)
+    in
     let _, candidates =
       match
-        Domains.fold (fun r bl acc ->
-            let nunk = Bitlist.num_unknown bl in
-            if nunk = 0 then
-              acc
-            else
-              match acc with
-              | Some (nunk', _) when nunk > nunk' -> acc
-              | Some (nunk', xs) when nunk = nunk' ->
-                Some (nunk', SX.add r xs)
-              | _ -> Some (nunk, SX.singleton r)
-          ) env.domain None
+        Constraints.fold_r (fun r acc ->
+            List.fold_left (fun acc { Bitv.bv; _ } ->
+                match bv with
+                | Bitv.Cte _ -> acc
+                | Other r | Ext (r, _, _, _) ->
+                  let bl = Domains.get r.value env.domain in
+                  f_acc r.value bl acc
+              ) acc (Shostak.Bitv.embed r)
+          ) env.constraints None
       with
       | Some (nunk, xs) -> nunk, xs
-      | None -> 0, SX.empty
+      | None ->
+        match Domains.fold f_acc env.domain None with
+        | Some (nunk, xs) -> nunk, xs
+        | None -> 0, SX.empty
     in
     (* For now, just pick a value for the most significant bit. *)
     match SX.choose candidates with
     | r ->
-      let biv = Shostak.Bitv.embed r in
-      let rec aux = function
-        | [] -> assert false
-        | { Bitv.bv = Bitv.Cte _; _ } :: biv -> aux biv
-        | part :: _ ->
-          Bitv.extract part.sz (part.sz - 1) (part.sz - 1) [ part ]
+      let bl = Domains.get r env.domain in
+      let w = Bitlist.width bl in
+      let unknown = Z.extract (Z.lognot @@ Bitlist.bits_known bl) 0 w in
+      let bitidx = Z.numbits unknown  - 1 in
+      let lhs =
+        Shostak.Bitv.is_mine @@
+        Bitv.extract w bitidx bitidx (Shostak.Bitv.embed r)
       in
-      let lhs = Shostak.Bitv.is_mine @@ aux biv in
       (* Just always pick zero for now. *)
       let zero = Shostak.Bitv.is_mine Bitv.[ { bv = Cte Z.zero ; sz = 1 } ] in
       if Options.get_debug_bitv () then
@@ -811,19 +689,19 @@ let case_split env _uf ~for_model =
 let add env uf r t =
   let delayed, eqs = Rel_utils.Delayed.add env.delayed uf r t in
   let env, eqs =
-    if is_bv_r r then
-      try
-        let bcs = extract_constraints env.constraints uf r t in
-        let dr = abstract_bitlist (Shostak.Bitv.embed r) Ex.empty in
-        let dom = Domains.update Ex.empty r env.domain dr in
-        let congruence = Congruence.add r env.congruence in
-        let eqs', bcs, dom = propagate bcs dom in
-        { env with congruence ; constraints = bcs ; domain = dom },
-        List.rev_append eqs' eqs
-      with Bitlist.Inconsistent ex ->
-        raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
-    else
-      env, eqs
+    match X.type_info r with
+    | Tbitv n -> (
+        try
+          let dr = Bitlist.unknown n Ex.empty in
+          let dom = Domains.update Ex.empty r env.domain dr in
+          let bcs = extract_constraints env.constraints uf r t in
+          let eqs', bcs, dom = propagate bcs dom in
+          { env with constraints = bcs ; domain = dom },
+          List.rev_append eqs' eqs
+        with Bitlist.Inconsistent ex ->
+          raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
+      )
+    | _ -> env, eqs
   in
   { env with delayed }, eqs
 
