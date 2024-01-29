@@ -233,7 +233,7 @@ module type Domain = sig
       justification [ex] used for the intersection. *)
 
 
-  val fold_leaves : (X.r -> t -> 'a -> 'a) -> X.r -> t -> 'a -> 'a
+  val iter_leaves : (X.r -> t -> unit) -> X.r -> t -> unit
   (** [fold_leaves f r t acc] folds [f] over the leaves of [r], deconstructing
       the domain [t] according to the structure of [r].
 
@@ -242,7 +242,7 @@ module type Domain = sig
 
       @raise Inconsistent if [r] cannot possibly be in the domain of [t]. *)
 
-  val map_leaves : (X.r -> 'a -> t) -> X.r -> 'a -> t
+  val map_leaves : (X.r -> t) -> X.r -> t
   (** [map_leaves f r acc] is the "inverse" of [fold_leaves] in the sense that
       it rebuilds a domain for [r] by using [f] to access the domain for each
       of [r]'s leaves. *)
@@ -253,29 +253,74 @@ module type Domains = sig
   (** The type of domain maps. A domain map maps each representative (semantic
       value, of type [X.r]) to its associated domain.*)
 
-  val pp : t Fmt.t
-  (** Pretty-printer for domain maps. *)
-
-  val empty : t
-  (** The empty domain map. *)
-
   type elt
   (** The type of domains contained in the map. Each domain of type [elt]
       applies to a single semantic value. *)
 
-  exception Inconsistent of Explanation.t
-  (** Exception raised by [update], [subst] and [structural_propagation] when
-      an inconsistency is detected. *)
+  val pp : t Fmt.t
+  (** Pretty-printer for domain maps. *)
+
+  val create : unit -> t
+  (** Create a new empty domain map. Domain maps are fully persistent data
+      structures, but they use a [builder] cache to improve the performance of
+      [modify] and avoid repeated allocations. *)
+
+  val get : X.r -> t -> elt
+  (** [get r t] returns the domain currently associated with [r] in [t].
+
+      If no domain is associated with [r] in [t], returns a most general domain
+      for [r] based on its structure. *)
 
   val add : X.r -> t -> t
   (** [add r t] adds a domain for [r] in the domain map. If [r] does not
       already have an associated domain, a fresh domain will be created for
       [r]. *)
 
-  val get : X.r -> t -> elt
-  (** [get r t] returns the domain currently associated with [r] in [t]. *)
+  val fold_leaves : (X.r -> elt -> 'a -> 'a) -> t -> 'a -> 'a
+  (** [fold f t acc] folds [f] over all the domains in [t] that are associated
+      with leaves. *)
 
-  val update : X.r -> elt -> t -> t
+  exception Inconsistent of Explanation.t
+  (** Exception raised by [update], [subst] and [next_pending] when
+      an inconsistency is detected. *)
+
+  type builder
+  (** An imperative wrapper around domain maps used for efficiently updating the
+      domain map (typically for propagation). Obtained using [modify]. *)
+
+  type handle
+  (** A handle to a single domain that tracks whether the domain has been
+      updated and allows multiple read/write operations on the domain without
+      lookups. *)
+
+  val modify : t -> (builder -> 'a) -> 'a * t
+  (** [modify t f] creates a new [builder] with the current state of [t] and
+      passes it to [f].
+
+      This allows performing multiple updates of [t] at once in an imperative
+      style and data structures (e.g. hash tables instead of functional maps).
+
+      The implementation uses a shared builder that is stored on the domains map
+      in order to avoid costly allocations each time [modify] is called, and so
+      that calling [modify] without actually performing any modifications is
+      cheap. This means that it is not possible to nest calls to [modify] on
+      domain maps that originates from the same call to [create ()].
+
+      @raise Invalid_argument if there is already an ongoing modification of [t]
+        or another domains map that originates from the same [create ()] call as
+        [t]. *)
+
+  val handle : ?add:bool -> builder -> X.r -> handle
+  (** [handle bld r] returns a handle to the domain associatd with [r].
+
+      If the optional argument [add] is [true], and no domain associated with
+      [r] exists, a new domain for [r] is initialized based on its structure.
+
+      @raise Invalid_argument if [add] is [false] and no domain is associated
+         with [r] in [bld]. It is a programming error to do so: do not catch
+         this exception and fix your code. *)
+
+  val update : ex:Explanation.t -> handle -> elt -> unit
   (** [update r d t] intersects the domain of [r] in [t] with the domain [d].
 
       {b Soundness}: The domain [d] must already include the justification
@@ -284,11 +329,10 @@ module type Domains = sig
       @raise Inconsistent if this causes the domain associated with [r] to
       become empty. *)
 
-  val fold_leaves : (X.r -> elt -> 'a -> 'a) -> t -> 'a -> 'a
-  (** [fold f t acc] folds [f] over all the domains in [t] that are associated
-      with leaves. *)
+  val ( !! ) : handle -> elt
+  (** Return the domain associated with a [handle]. *)
 
-  val subst : ex:Explanation.t -> X.r -> X.r -> t -> t
+  val subst : ex:Explanation.t -> X.r -> X.r -> builder -> unit
   (** [subst ~ex p v d] replaces all the instances of [p] with [v] in all
       domains, merging the corresponding domains as appropriate.
 
@@ -296,8 +340,8 @@ module type Domains = sig
 
       @raise Inconsistent if this causes any domain in [d] to become empty. *)
 
-  val choose_changed : t -> X.r * t
-  (** [choose_changed d] returns a pair [r, d'] such that:
+  val next_pending : builder -> X.r option
+  (** [choose_changed d] returns a pair [r] such that:
 
       - The domain associated with [r] has changed since the last time
         [choose_changed] was called.
@@ -326,16 +370,102 @@ struct
 
   exception Inconsistent = Domain.Inconsistent
 
+  module HT = Hashtbl.Make(struct
+      type t = X.r
+
+      let hash = X.hash
+
+      let equal = X.equal
+    end)
+
+  type builder = {
+    mutable domains_map : Domain.t MX.t ;
+    (** The original [domains] from the snapshot this was created from, minus
+        any elements that were removed. *)
+
+    mutable parents_map : SX.t MX.t ;
+    (** Map from leaves to the tracked representatives that contains them.
+        Updated on adding and substitution. *)
+
+    domains_cache : handle HT.t ;
+    (** Cache of domain values for efficient access. Domains are initialized
+        from the [domains_map], see the documentation for [handle].  *)
+
+    dirty_cache : handle HT.t ;
+    (** Subset of the [domains_cache] that only contains dirty handle, i.e.
+        handles for which the domain has been updated and is no longer equal to
+        the one stored in the [domains_map].
+
+        This field is automatically updated from the [handle] when it becomes
+        dirty. *)
+
+    pending_set : unit HT.t ;
+    (** Set of representatives marked as pending, i.e. whose domain has been
+        updated since the last propagation.
+
+        Note that pending elements are not guaranteed to be in either of the
+        [domains_cache] (if the element was pending in the snapshot) or the
+        [domains_map] (if the element was added since the snapshot), but they
+        are guaranteed to be in at least one of them.
+
+        This field is automatically updated from the [handle] when it becomes
+        pending. *)
+  }
+
+  and handle = {
+    repr : X.r ;
+    (** Semantic value associated with this handle. *)
+
+    mutable domain : Domain.t ;
+    (** The domain associated with [repr]. *)
+
+    mutable dirty : bool ;
+    (** Dirty flag. If true, the [domain] is not identical to the one in the
+        [owner]'s [domain_map] and it will need to be updated in the persistent
+        [snapshot]. Otherwise, the [snapshot] does not need to be updated.
+
+        The [dirty] flag is true iff the [repr] is in its [owner]'s
+        [dirty_cache] (in which case it must be mapped to this [handle]). *)
+
+    mutable pending : bool ;
+    (** Pending flag. If true, the [domain] has been updated since the last
+        propagation. Note that [pending] may be [true] while [dirty] is [false]
+        if the representative was pending in the original snapshot.
+
+        The [pending] flag is true iff the [repr] is in its [owner]'s
+        [pending_set]. *)
+
+    owner : builder
+    (** The domains set that contains this handle. Used to automatically update
+        the [dirty_cache] and [pending_set] fields from the [handle]. *)
+  }
+
   type t = {
     domains : Domain.t MX.t ;
     (** Map from tracked representatives to their domain *)
 
     changed : SX.t ;
-    (** Representatives whose domain has changed since the last flush *)
+    (** Representatives whose domain has changed since the last propagation *)
 
-    leaves_map : SX.t MX.t ;
+    parents : SX.t MX.t ;
     (** Map from leaves to the *tracked* representatives that contains them *)
+
+    builder : builder option ref ;
   }
+
+  let create () =
+    let cell = ref @@ Some
+        { domains_map = MX.empty
+        ; parents_map = MX.empty
+        ; domains_cache = HT.create 17
+        ; dirty_cache = HT.create 17
+        ; pending_set = HT.create 17
+        }
+    in
+    { domains = MX.empty
+    ; changed = SX.empty
+    ; parents = MX.empty
+    ; builder = cell }
 
   let pp ppf t =
     Fmt.(iter_bindings ~sep:semi MX.iter
@@ -344,16 +474,173 @@ struct
         )
       ppf t.domains
 
-  let empty =
-    { domains = MX.empty ; changed = SX.empty ; leaves_map = MX.empty }
 
-  let r_add r leaves_map =
-    List.fold_left (fun leaves_map leaf ->
+  let modify { domains; changed; parents; builder = cell } f =
+    let t =
+      match !cell with
+      | Some builder ->
+        HT.clear builder.domains_cache;
+        HT.clear builder.dirty_cache;
+        HT.clear builder.pending_set;
+        cell := None;
+        builder
+      | None ->
+        (* Can only modify the same domain set once at a time. *)
+        invalid_arg "modify"
+    in
+    t.domains_map <- domains;
+    t.parents_map <- parents;
+    SX.iter (fun r -> HT.add t.pending_set r ()) changed;
+    Fun.protect ~finally:(fun () -> cell := Some t) @@ fun () ->
+    let res = f t in
+    let domains =
+      HT.fold (fun r { domain; dirty; _ } domains ->
+          assert dirty;
+          MX.add r domain domains
+        ) t.dirty_cache t.domains_map
+    in
+    let changed =
+      HT.fold (fun r () changed -> SX.add r changed) t.pending_set SX.empty
+    in
+    cell := Some t;
+    res, { domains; changed; parents = t.parents_map; builder = cell }
+
+  let r_add r parents_map =
+    List.fold_left (fun parents_map leaf ->
         MX.update leaf (function
             | Some parents -> Some (SX.add r parents)
             | None -> Some (SX.singleton r)
-          ) leaves_map
-      ) leaves_map (X.leaves r)
+          ) parents_map
+      ) parents_map (X.leaves r)
+
+  let ( !! ) { domain; _ } = domain
+
+  let handle ?(add = false) t r =
+    try
+      HT.find t.domains_cache r
+    with Not_found ->
+      let domain, dirty =
+        match MX.find r t.domains_map with
+        | domain -> domain, false
+        | exception Not_found ->
+          if not add then invalid_arg "handle";
+          t.parents_map <- r_add r t.parents_map;
+          Domain.create r, true
+      in
+      let pending = HT.mem t.pending_set r in
+      let handle = { repr = r; domain; dirty; pending; owner = t } in
+      HT.add t.domains_cache r handle;
+      if dirty then
+        HT.add t.dirty_cache r handle;
+      handle
+
+  let handle_assert t r =
+    try handle t r with Not_found -> assert false
+
+  let set_dirty handle =
+    if not handle.dirty then (
+      handle.dirty <- true;
+      HT.replace handle.owner.dirty_cache handle.repr handle
+    )
+
+  let set_pending handle =
+    if not handle.pending then (
+      handle.pending <- true;
+      HT.replace handle.owner.pending_set handle.repr ()
+    )
+
+  let update ~ex handle domain =
+    let domain = Domain.intersect ~ex handle.domain domain in
+    if not (Domain.equal handle.domain domain) then (
+      set_dirty handle;
+      set_pending handle;
+      handle.domain <- domain
+    )
+
+  let r_remove r parents_map =
+    List.fold_left (fun parents_map leaf ->
+        MX.update leaf (function
+            | Some parents ->
+              let parents = SX.remove r parents in
+              if SX.is_empty parents then None else Some parents
+            | None -> None
+          ) parents_map
+      ) parents_map (X.leaves r)
+
+  let subst ~ex rr nrr (t : builder) =
+    match MX.find rr t.parents_map with
+    | parents ->
+      let domains_map, parents_map =
+        SX.fold (fun r (domains_map, parents_map) ->
+            let domain, r_pending =
+              match HT.find t.domains_cache r with
+              | { domain; dirty; pending; _ } ->
+                HT.remove t.domains_cache r;
+                if dirty then
+                  HT.remove t.dirty_cache r;
+                domain, pending
+              | exception Not_found ->
+                try MX.find r t.domains_map, HT.mem t.pending_set r
+                with Not_found ->
+                  (* [r] was in the [parents_map] to it must have a domain *)
+                  assert false
+            in
+            let nr = X.subst rr nrr r in
+            let nhandle = handle ~add:true t nr in
+            update ~ex nhandle domain;
+            if r_pending then (
+              set_pending nhandle;
+              HT.remove t.pending_set r
+            );
+            MX.remove r domains_map,
+            r_add nr @@ r_remove r @@ parents_map
+          ) parents (t.domains_map, t.parents_map)
+      in
+      t.domains_map <- domains_map;
+      t.parents_map <- parents_map
+    | exception Not_found -> ()
+
+  let structural_propagation r (t : builder) =
+    if X.is_a_leaf r then
+      match MX.find r t.parents_map with
+      | parents ->
+        SX.iter (fun parent ->
+            if X.is_a_leaf parent then (
+              assert (X.equal r parent)
+            ) else
+              (* If we are in the [parents_map] we must have a handle. *)
+              update ~ex:Explanation.empty (handle_assert t parent) @@
+              Domain.map_leaves (fun r -> (handle ~add:true t r).domain) parent
+          ) parents
+      | exception Not_found -> ()
+    else
+      let update r d =
+        update ~ex:Explanation.empty (handle ~add:true t r) d
+      in
+      (* Only called on representatives that are in the map, so [handle] cannot
+         fail (see [next_pending]). *)
+      Domain.iter_leaves update r (handle_assert t r).domain
+
+  let next_pending t =
+    let chosen = ref None in
+    begin try
+        HT.iter (fun r () -> chosen := Some r; raise Exit) t.pending_set
+      with Exit -> () end;
+    match !chosen with
+    | Some r ->
+      let handle =
+        try
+          handle ~add:false t r
+        with Not_found ->
+          (* Values in the pending_set must have a domain. *)
+          assert false
+      in
+      assert handle.pending;
+      handle.pending <- false;
+      HT.remove t.pending_set r;
+      structural_propagation r t;
+      Some r
+    | None -> None
 
   let add r t =
     match MX.find r t.domains with
@@ -364,24 +651,8 @@ struct
           already be marked as pending due to being newly added. *)
       let d = Domain.create r in
       let domains = MX.add r d t.domains in
-      let leaves_map = r_add r t.leaves_map in
-      { t with domains; leaves_map }
-
-  let r_remove r leaves_map =
-    List.fold_left (fun leaves_map leaf ->
-        MX.update leaf (function
-            | Some parents ->
-              let parents = SX.remove r parents in
-              if SX.is_empty parents then None else Some parents
-            | None -> None
-          ) leaves_map
-      ) leaves_map (X.leaves r)
-
-  let remove r t =
-    let changed = SX.remove r t.changed in
-    let domains = MX.remove r t.domains in
-    let leaves_map = r_remove r t.leaves_map in
-    { changed; domains; leaves_map }
+      let parents = r_add r t.parents in
+      { t with domains; parents }
 
   let get r t =
     (* We need to catch [Not_found] because of fresh terms that can be added
@@ -389,107 +660,10 @@ struct
         case, only structural constraints can apply to [r]. *)
     try MX.find r t.domains with Not_found -> Domain.create r
 
-  let update r d t =
-    match MX.find r t.domains with
-    | od ->
-      (* Both domains are already valid for [r], we can intersect them
-          without additional justifications. *)
-      let d = Domain.intersect ~ex:Explanation.empty od d in
-      if Domain.equal od d then
-        t
-      else
-        let domains = MX.add r d t.domains in
-        let changed = SX.add r t.changed in
-        { t with domains; changed }
-    | exception Not_found ->
-      (* We need to catch [Not_found] because of fresh terms that can be added
-          by the solver and for which we don't call [add]. *)
-      let d = Domain.intersect ~ex:Explanation.empty d (Domain.create r) in
-      let domains = MX.add r d t.domains in
-      let changed = SX.add r t.changed in
-      let leaves_map = r_add r t.leaves_map in
-      { domains; changed; leaves_map }
-
   let fold_leaves f t acc =
     MX.fold (fun r _ acc ->
         f r (get r t) acc
-      ) t.leaves_map acc
-
-  let subst ~ex rr nrr t =
-    match MX.find rr t.leaves_map with
-    | parents ->
-      SX.fold (fun r t ->
-          let d =
-            try MX.find r t.domains
-            with Not_found ->
-              (* [r] was in the [leaves_map] to it must have a domain *)
-              assert false
-          in
-          let changed = SX.mem r t.changed in
-          let t = remove r t in
-          let nr = X.subst rr nrr r in
-          match MX.find nr t.domains with
-          | nd ->
-            (* If there is an existing domain for [nr], there might be
-                constraints applying to [nr] prior to the substitution, and the
-                constraints that used to apply to [r] will also apply to [nr]
-                after the substitution.
-
-                We need to notify changed to either of these constraints, so we
-                must notify if the domain is different from *either* the old
-                domain of [r] or the old domain of [nr]. *)
-            let nnd = Domain.intersect ~ex d nd in
-            let nr_changed = not (Domain.equal nnd nd) in
-            let r_changed = not (Domain.equal nnd d) in
-            let domains =
-              if nr_changed then MX.add nr nnd t.domains else t.domains
-            in
-            let changed = changed || r_changed || nr_changed in
-            let changed =
-              if changed then SX.add nr t.changed else t.changed
-            in
-            { t with domains; changed }
-          | exception Not_found ->
-            (* If there is no existing domain for [nr], there were no
-                constraints applying to [nr] prior to the substitution.
-
-                The only constraints that need to be notified are those that were
-                applying to [r], and they only need to be notified if the new
-                domain is different from the old domain of [r]. *)
-            let nd = Domain.intersect ~ex d (Domain.create nr) in
-            let r_changed = not (Domain.equal nd d) in
-            let domains = MX.add nr nd t.domains in
-            let leaves_map = r_add nr t.leaves_map in
-            let changed = changed || r_changed in
-            let changed =
-              if changed then SX.add nr t.changed else t.changed
-            in
-            { domains; changed; leaves_map }
-        ) parents t
-    | exception Not_found ->
-      (* We are not tracking any semantic value that have [r] as a leaf, so we
-          have nothing to do. *)
-      t
-
-  let structural_propagation r t =
-    if X.is_a_leaf r then
-      match MX.find r t.leaves_map with
-      | parents ->
-        SX.fold (fun parent t ->
-            if X.is_a_leaf parent then (
-              assert (X.equal r parent);
-              t
-            ) else
-              update parent (Domain.map_leaves get parent t) t
-          ) parents t
-      | exception Not_found -> t
-    else
-      Domain.fold_leaves update r (get r t) t
-
-  let choose_changed t =
-    let r = SX.choose t.changed in
-    let t = { t with changed = SX.remove r t.changed } in
-    r, structural_propagation r t
+      ) t.parents acc
 end
 
 module type Constraint = sig
