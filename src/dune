@@ -2,15 +2,15 @@
  (dev ;; This profil is used (default) to dev without optimisation and blocking warnings.
   (flags
    (:standard -bin-annot -w -22 -warn-error -A))
-  (ocamlopt_flags -g))
+  (ocamlopt_flags (:standard -g)))
  (ci ;; This profile is used by the CI.
   (flags
    (:standard -bin-annot -w -22 -warn-error +A))
-  (ocamlopt_flags -g))
+  (ocamlopt_flags (:standard -g)))
  (release ;; The release profile has optimizations enabled.
   (flags
    (:standard -bin-annot -w -22))
-  (ocamlopt_flags -O3 -unbox-closures))
+  (ocamlopt_flags (:standard -O3 -unbox-closures)))
   (js_of_ocaml (flags --no-source-map))
 )
 
