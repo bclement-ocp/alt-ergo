@@ -99,9 +99,9 @@ module Interval_domain : Rel_utils.Domain with type t = Intervals.t = struct
     | _ -> assert false
 
   let intersect ~ex x y =
-    try
-      Intervals.intersect x y
-    with Inconsistent ex' ->
+    match Intervals.intersect x y with
+    | xy -> Intervals.add_explanation xy ex
+    | exception Inconsistent ex' ->
       raise @@ Inconsistent (Ex.union ex ex')
 
   let lognot sz int =
