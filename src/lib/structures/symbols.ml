@@ -46,7 +46,10 @@ type operator =
   (* BV *)
   | Concat
   | Extract of int * int (* lower bound * upper bound *)
-  | BVnot | BVand | BVor | BVxor | Int2BV of int | BV2Nat
+  | BVnot | BVand | BVor | BVxor
+  | BVadd | BVsub | BVmul
+  | BVshl
+  | Int2BV of int | BV2Nat
   (* FP *)
   | Float
   | Integer_round
@@ -196,7 +199,10 @@ let compare_operators op1 op2 =
             | Real_of_int | Int_floor | Int_ceil | Sqrt_real_default
             | Sqrt_real_excess | Min_real | Min_int | Max_real | Max_int
             | Integer_log2 | Pow | Integer_round
-            | BVnot | BVand | BVor | BVxor | Int2BV _ | BV2Nat
+            | BVnot | BVand | BVor | BVxor
+            | BVadd | BVsub | BVmul
+            | BVshl
+            | Int2BV _ | BV2Nat
             | Not_theory_constant | Is_theory_constant | Linear_dependency
             | Constr _ | Destruct _ | Tite) -> assert false
     )
@@ -354,6 +360,12 @@ module AEPrinter = struct
     | BVor -> Fmt.pf ppf "bvor"
     | BVxor -> Fmt.pf ppf "bvxor"
 
+    (* BV logic *)
+    | BVadd -> Fmt.pf ppf "bvadd"
+    | BVsub -> Fmt.pf ppf "bvsub"
+    | BVmul -> Fmt.pf ppf "bvmul"
+    | BVshl -> Fmt.pf ppf "bvshl"
+
     (* ArraysEx theory *)
     | Get -> Fmt.pf ppf "get"
     | Set -> Fmt.pf ppf "set"
@@ -453,6 +465,12 @@ module SmtPrinter = struct
     | BVand -> Fmt.pf ppf "bvand"
     | BVor -> Fmt.pf ppf "bvor"
     | BVxor -> Fmt.pf ppf "bvxor"
+
+    (* BV logic *)
+    | BVadd -> Fmt.pf ppf "bvadd"
+    | BVsub -> Fmt.pf ppf "bvsub"
+    | BVmul -> Fmt.pf ppf "bvmul"
+    | BVshl -> Fmt.pf ppf "bvshl"
 
     (* ArraysEx theory *)
     | Get -> Fmt.pf ppf "select"

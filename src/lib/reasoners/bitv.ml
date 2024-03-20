@@ -350,7 +350,10 @@ module Shostak(X : ALIEN) = struct
   let is_mine_symb sy _ =
     match sy with
     | Sy.Bitv _
-    | Op (Concat | Extract _ | BV2Nat | BVnot | BVand | BVor | BVxor)
+    | Op (
+        Concat | Extract _ | BV2Nat
+        | BVnot | BVand | BVor | BVxor
+        | BVadd | BVsub | BVmul | BVshl)
       -> true
     | _ -> false
 
@@ -406,7 +409,9 @@ module Shostak(X : ALIEN) = struct
     let other ~neg t _sz ctx =
       let r, ctx' =
         match E.term_view t with
-        | { f = Op (BVand | BVor | BVxor); _ } ->
+        | { f = Op (
+            BVand | BVor | BVxor | BVadd | BVsub | BVmul | BVshl
+          ); _ } ->
           X.term_embed t, []
         | _ -> X.make t
       in
