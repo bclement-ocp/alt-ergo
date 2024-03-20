@@ -153,7 +153,14 @@ let logxor b1 b2 =
   }
 
 (* The logic for the [increase_lower_bound] function below is described in
-   section 4.1 of https://cea.hal.science/cea-01795779/document *)
+   section 4.1 of
+
+   Sharpening Constraint Programming approaches for Bit-Vector Theory.
+   Zakaria Chihani, Bruno Marre, François Bobot, Sébastien Bardin.
+   CPAIOR 2017. International Conference on AI and OR Techniques in
+   Constraint Programming for Combinatorial Optimization Problems, Jun
+   2017, Padova, Italy.
+   https://cea.hal.science/cea-01795779/document *)
 
 (* [left_cl_can_set highest_cleared cleared_can_set] returns the
    least-significant bit that is:

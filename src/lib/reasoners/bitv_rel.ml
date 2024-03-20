@@ -681,6 +681,12 @@ let rec shared_msb sz inf sup =
 (* If m and M are the minimal and maximal values of an union of intervals, the
    longest sequence of most significant bits shared between m and M can be fixed
    in the bit-vector domain; see "Is to BVs" in section 4.1 of
+
+   Sharpening Constraint Programming approaches for Bit-Vector Theory.
+   Zakaria Chihani, Bruno Marre, François Bobot, Sébastien Bardin.
+   CPAIOR 2017. International Conference on AI and OR Techniques in
+   Constraint Programming for Combinatorial Optimization Problems, Jun
+   2017, Padova, Italy.
    https://cea.hal.science/cea-01795779/document *)
 let constrain_bitlist_from_interval bv int =
   let open Domains.Ephemeral in
@@ -733,7 +739,8 @@ let interval ~ex lb ub =
       (is_large lineq) (is_large uineq)
       ex ex Tint
 
-(* Algorithm 1 from https://cea.hal.science/cea-01795779/document *)
+(* Algorithm 1 from "Sharpening Constraint Programming approaches for
+   Bit-Vector Theory". *)
 let constrain_interval_from_bitlist int bv =
   let open Interval_domains.Ephemeral in
   let ex = Bitlist.explanation bv in
