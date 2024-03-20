@@ -237,6 +237,18 @@ module Constraint : sig
   val bvxor : X.r -> X.r -> X.r -> t
   (** [bvxor x y z] is the constraint [x ^ y ^ z = 0] *)
 
+  val bvadd : X.r -> X.r -> X.r -> t
+  (** [bvadd r x y] is the constraint [r = x + y] *)
+
+  val bvsub : X.r -> X.r -> X.r -> t
+  (** [bvsub r x y] is the constraint [r = x - y] *)
+
+  val bvmul : X.r -> X.r -> X.r -> t
+  (** [bvmul r x y] is the constraint [r = x * y] *)
+
+  val bvshl : X.r -> X.r -> X.r -> t
+  (** [bvshl r x y] is the constraint [r = x << y] *)
+
   val bvule : X.r -> X.r -> t
 
   val bvugt : X.r -> X.r -> t
@@ -252,18 +264,26 @@ end = struct
   type binop =
     (* Bitwise operations *)
     | Band | Bor | Bxor
+    (* Arithmetic operations *)
+    | Badd | Bmul
+    (* Shift operations *)
+    | Bshl
 
   let pp_binop ppf = function
     | Band -> Fmt.pf ppf "bvand"
     | Bor -> Fmt.pf ppf "bvor"
     | Bxor -> Fmt.pf ppf "bvxor"
+    | Badd -> Fmt.pf ppf "bvadd"
+    | Bmul -> Fmt.pf ppf "bvmul"
+    | Bshl -> Fmt.pf ppf "bvshl"
 
   let equal_binop : binop -> binop -> bool = Stdlib.(=)
 
   let hash_binop : binop -> int = Hashtbl.hash
 
   let is_commutative = function
-    | Band | Bor | Bxor -> true
+    | Band | Bor | Bxor | Badd | Bmul -> true
+    | Bshl -> false
 
   let propagate_binop ~ex dx op dy dz =
     let open Domains.Ephemeral in
@@ -293,6 +313,9 @@ end = struct
       (* x = y ^ z <-> y = x ^ z *)
       update ~ex dy (Bitlist.logxor !!dx !!dz);
       update ~ex dz (Bitlist.logxor !!dx !!dy)
+    | Badd | Bmul | Bshl ->
+      (* No bitlist propagation for arithmetic and shift operations yet *)
+      ()
 
   let propagate_interval_binop ~ex:_ _r _op _y _z =
     (* No interval propagation for binops yet *)
@@ -490,6 +513,12 @@ end = struct
   let bvand = cbinop Band
   let bvor = cbinop Bor
   let bvxor = cbinop Bxor
+  let bvadd = cbinop Badd
+  let bvsub r x y =
+    (* r = x - y <-> x = r + y *)
+    bvadd x r y
+  let bvmul = cbinop Bmul
+  let bvshl = cbinop Bshl
 
   let crel r = hcons @@ Crel r
 
@@ -516,10 +545,19 @@ end = struct
     propagate_interval_repr ~ex dom c.repr
 
   let simplify_binop acts op r x y =
-    let acts_add_zero r =
-      let sz = match X.type_info r with Tbitv n -> n | _ -> assert false in
+    let bitwidth r =
+      match X.type_info r with Tbitv n -> n | _ -> assert false
+    in
+    let acts_add_const r z =
+      let sz = bitwidth r in
       acts.Rel_utils.acts_add_eq r
-        (Shostak.Bitv.is_mine [ { bv = Cte Z.zero ; sz }])
+        (Shostak.Bitv.is_mine [ { bv = Cte (Z.extract z 0 sz); sz }])
+    in
+    let acts_add_zero r = acts_add_const r Z.zero in
+    let const_value x =
+      match Shostak.Bitv.embed x with
+      | [ { bv = Cte n; _ } ] -> n
+      | _ -> invalid_arg "const_value"
     in
     match op with
     | Band | Bor when X.equal x y ->
@@ -532,6 +570,55 @@ end = struct
       acts_add_zero y; true
     | Bxor when X.equal r y ->
       acts_add_zero x; true
+
+    | Badd ->
+      if X.equal x y then (
+        (* TODO: r = x + x -> r = 2x *)
+        false
+      ) else if X.equal r x then (
+        (* x = x + y -> y = 0 *)
+        acts_add_zero y; true
+      ) else if X.equal r y then (
+        (* y = x + y -> x = 0 *)
+        acts_add_zero x; true
+      ) else if X.is_constant x then
+        if X.is_constant y then (
+          acts_add_const r Z.(const_value x + const_value y); true
+        ) else if X.is_constant r then (
+          acts_add_const y Z.(const_value r - const_value x); true
+        ) else
+          (* TODO: r - y = cte *)
+          false
+      else if X.is_constant y then
+        if X.is_constant r then (
+          acts_add_const x Z.(const_value r - const_value y); true
+        ) else
+          (* TODO: r - x = cte *)
+          false
+      else
+        false
+
+    (* shl becomes a simple extraction when we know the right-hand side *)
+    | Bshl when X.is_constant y -> (
+        let sz = bitwidth r in
+        match Z.to_int (const_value y) with
+        | 0 -> acts.acts_add_eq r x; true
+        | n when n < sz ->
+          assert (n > 0);
+          let r_bitv = Shostak.Bitv.embed r in
+          let high_bits =
+            Shostak.Bitv.is_mine @@
+            Bitv.extract sz n (sz - 1 - n) (Shostak.Bitv.embed y)
+          in
+          acts.acts_add_eq
+            (Shostak.Bitv.is_mine @@ Bitv.extract sz n (sz - 1 - n) r_bitv)
+            high_bits;
+          acts.acts_add_eq
+            (Shostak.Bitv.is_mine @@ Bitv.extract sz 0 n r_bitv)
+            (Shostak.Bitv.is_mine [ { bv = Cte Z.zero; sz = n }]);
+          true
+        | _ | exception Z.Overflow -> acts_add_zero r; true
+      )
 
     | _ -> false
 
@@ -563,6 +650,10 @@ let extract_binop =
     | Sy.BVand -> Some bvand
     | BVor -> Some bvor
     | BVxor -> Some bvxor
+    | BVadd -> Some bvadd
+    | BVsub -> Some bvsub
+    | BVmul -> Some bvmul
+    | BVshl -> Some bvshl
     | _ -> None
 
 let extract_constraints bcs uf r t =
