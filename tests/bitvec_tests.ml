@@ -225,7 +225,7 @@ let test_decrease_upper_bound sz =
 let () =
   Test.check_exn (test_decrease_upper_bound 3)
 
-let test_bitlist_binop ~count sz zop iop =
+let test_bitlist_binop ~count sz zop bop =
   Test.make ~count
     ~print:Print.(
         pair
@@ -233,9 +233,12 @@ let test_bitlist_binop ~count sz zop iop =
           (Fmt.to_to_string Bitlist.pp))
     Gen.(pair (bitlist sz) (bitlist sz))
     (fun (s, t) ->
+       let u = bop s t in
+       Bitlist.width u = Bitlist.width s &&
+       Bitlist.width u = Bitlist.width t &&
        IntSet.subset
          (IntSet.map2 zop (of_bitlist s) (of_bitlist t))
-         (of_bitlist (iop s t)))
+         (of_bitlist u))
 
 let test_interval_binop ~count sz zop iop =
   Test.make ~count
