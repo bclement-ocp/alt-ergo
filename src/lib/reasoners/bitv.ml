@@ -353,7 +353,8 @@ module Shostak(X : ALIEN) = struct
     | Op (
         Concat | Extract _ | BV2Nat
         | BVnot | BVand | BVor | BVxor
-        | BVadd | BVsub | BVmul | BVshl)
+        | BVadd | BVsub | BVmul | BVudiv | BVurem
+        | BVshl | BVlshr)
       -> true
     | _ -> false
 
@@ -410,7 +411,9 @@ module Shostak(X : ALIEN) = struct
       let r, ctx' =
         match E.term_view t with
         | { f = Op (
-            BVand | BVor | BVxor | BVadd | BVsub | BVmul | BVshl
+            BVand | BVor | BVxor
+            | BVadd | BVsub | BVmul | BVudiv | BVurem
+            | BVshl | BVlshr
           ); _ } ->
           X.term_embed t, []
         | _ -> X.make t

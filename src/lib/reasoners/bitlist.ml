@@ -38,7 +38,7 @@ let explanation { ex; _ } = ex
 
 let exact width value ex =
   { width
-  ; bits_set = value
+  ; bits_set = Z.extract value 0 width
   ; bits_clr = Z.extract (Z.lognot value) 0 width
   ; ex }
 
@@ -252,3 +252,96 @@ let fold_domain f b acc =
         (ofs + 1) { b with bits_set = Z.logor b.bits_set mask } acc
   in
   fold_domain_aux 0 b acc
+
+
+(* simple propagator: only compute known low bits *)
+let mul a b =
+  let sz = width a in
+  assert (width b = sz);
+
+  let ex = Ex.union (explanation a) (explanation b) in
+
+  (* (a * 2^n) * (b * 2^m) = (a * b) * 2^(n + m) *)
+  let zeroes_a = Z.trailing_zeros @@ Z.lognot a.bits_clr in
+  let zeroes_b = Z.trailing_zeros @@ Z.lognot b.bits_clr in
+  let low_bits =
+    if zeroes_a + zeroes_b = 0 then empty
+    else exact (zeroes_a + zeroes_b) Z.zero ex
+  in
+  if width low_bits >= sz then
+    low_bits
+  else
+    let a = extract a zeroes_a (zeroes_a + sz - width low_bits - 1) in
+    assert (width a + width low_bits = sz);
+    let b = extract b zeroes_b (zeroes_b + sz - width low_bits - 1) in
+    assert (width b + width low_bits = sz);
+    (* ((ah * 2^n) + al) * ((bh * 2^m) + bl) =
+        al * bl  (mod 2^(min n m)) *)
+    let low_a_known = Z.trailing_zeros @@ Z.lognot @@ bits_known a in
+    let low_b_known = Z.trailing_zeros @@ Z.lognot @@ bits_known b in
+    let low_known = min low_a_known low_b_known in
+    let mid_bits =
+      if low_known = 0 then empty
+      else exact
+          low_known
+          Z.(extract (value a) 0 low_known * extract (value b) 0 low_known)
+          ex
+    in
+    concat (unknown (sz - width mid_bits - width low_bits) Ex.empty) @@
+    concat mid_bits low_bits
+
+let shl a b =
+  (* If the minimum value for [b] is larger than the bitwidth, the result is
+     zero.
+
+     Otherwise, any low zero bit in [a] is also a zero bit in the result, and
+     the minimum value for [b] also accounts for that many minimum zeros (e.g.
+     ?000 shifted by at least 2 has at least 5 low zeroes).
+
+     NB: we would like to use the lower bound from the interval domain for [b]
+     here. *)
+  match Z.to_int (increase_lower_bound b Z.zero) with
+  | n when n < width a ->
+    let low_zeros = Z.trailing_zeros @@ Z.lognot @@ a.bits_clr in
+    if low_zeros + n >= width a then
+      exact (width a) Z.zero (Ex.union (explanation a) (explanation b))
+    else if low_zeros + n > 0 then
+      concat (unknown (width a - low_zeros - n) Ex.empty) @@
+      exact (low_zeros + n) Z.zero (Ex.union (explanation a) (explanation b))
+    else
+      unknown (width a) Ex.empty
+  | _ | exception Z.Overflow ->
+    exact (width a) Z.zero (explanation b)
+
+let lshr a b =
+  (* If the minimum value for [b] is larger than the bitwidth, the result is
+     zero.
+
+     Otherwise, any high zero bit in [a] is also a zero bit in the result, and
+     the minimum value for [b] also accounts for that many minimum zeros (e.g.
+     000??? shifted by at least 2 is 00000?).
+
+     NB: we would like to use the lower bound from the interval domain for [b]
+     here. *)
+  match Z.to_int (increase_lower_bound b Z.zero) with
+  | n when n < width a ->
+    let sz = width a in
+    if Z.testbit a.bits_clr (sz - 1) then (* MSB is zero *)
+      let low_msb_zero = Z.numbits @@ Z.extract (Z.lognot a.bits_clr) 0 sz in
+      let nb_msb_zeros = sz - low_msb_zero in
+      assert (nb_msb_zeros > 0);
+      let nb_zeros = nb_msb_zeros + n in
+      if nb_zeros >= sz then
+        exact sz Z.zero (Ex.union (explanation a) (explanation b))
+      else
+        concat
+          (exact nb_zeros Z.zero (Ex.union (explanation a) (explanation b)))
+          (unknown (sz - nb_zeros) Ex.empty)
+    else if n > 0 then
+      concat
+        (exact n Z.zero (explanation b))
+        (unknown (sz - n) Ex.empty)
+    else
+      unknown sz Ex.empty
+  | _ | exception Z.Overflow ->
+    exact (width a) Z.zero (explanation b)

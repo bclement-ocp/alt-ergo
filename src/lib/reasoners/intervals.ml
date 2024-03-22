@@ -30,13 +30,13 @@
 
 module Ex = Explanation
 
-type borne =
-  | Strict of (Q.t * Ex.t)
-  | Large of (Q.t * Ex.t)
+type 'a borne =
+  | Strict of ('a * Ex.t)
+  | Large of ('a * Ex.t)
   | Pinfty | Minfty
 
 type t = {
-  ints : (borne * borne) list;
+  ints : (Q.t borne * Q.t borne) list;
   is_int : bool;
   expl: Ex.t
 }
@@ -133,8 +133,9 @@ let borne_inf = function
   | { ints = (Strict (v, ex), _) :: _; _ } -> v, ex, false
   | _ -> raise No_finite_bound
 
-let only_borne_inf ({ ints; _ } as t) =
-  { t with ints = List.map (function (inf, _) -> (inf, Pinfty)) ints; }
+let only_borne_inf = function
+  | { ints = (inf, _) :: _ ; _ } as t -> { t with ints = [(inf, Pinfty)] }
+  | _ -> assert false
 
 let borne_sup { ints; _ } =
   match List.rev ints with
@@ -142,9 +143,12 @@ let borne_sup { ints; _ } =
   | (_, Strict (v, ex))::_ -> v, ex, false
   | _ -> raise No_finite_bound
 
-let only_borne_sup ({ ints; _ } as t) =
-  { t with ints = List.map (function (_, sup) -> (Minfty, sup)) ints; }
-
+let only_borne_sup t =
+  let rec aux = function
+    | [] -> assert false
+    | [ (_, sup) ] -> { t with ints = [(Minfty, sup)] }
+    | _ :: tl -> aux tl
+  in aux t.ints
 
 let explain_borne = function
   | Large (_, e) | Strict (_, e) -> e
@@ -260,9 +264,9 @@ let neg_borne b = match b with
 
 (* TODO: generalize the use of this type and the function joint below
    to other operations on intervals *)
-type kind =
+type 'a kind =
   | Empty of Explanation.t
-  | Int of (borne * borne)
+  | Int of ('a borne * 'a borne)
 
 let join l glob_ex = (* l should not be empty *)
   let rec j_aux _todo _done =
@@ -1200,6 +1204,211 @@ let pick ~is_max { ints; is_int; _ } =
 (*   Bit-vector  *)
 (*****************)
 
+(* [shl_overflows sz bnd] is [true] if shifting by the value stored in [bnd]
+   always overflows any bit-vector of width [sz], i.e. if the value in [bnd] is
+   larger than [sz].
+
+   [bnd] must be a natural integer bound, i.e. [Large] or [Pinfty]. *)
+let shl_overflows sz = function
+  | Large (q, _) ->
+    assert (Q.compare q Q.zero >= 0);
+    Q.compare q (Q.of_int sz) >= 0
+  | Pinfty -> true
+  | Minfty | Strict _ -> assert false
+
+(* [fits_bits sz bnd] is [true] if the value stored in [bnd] fits a bit-vector
+   if size [sz], i.e. if the value in [bnd] is in the [0 .. 2^sz - 1] range.
+
+   [bnd] must be a natural integer bound, i.e. [Large] or [Pinfty]. *)
+let fits_bits sz = function
+  | Large (q, _) -> Z.numbits (Q.to_bigint q) <= sz
+  | Pinfty -> false
+  | Minfty | Strict _ -> assert false
+
+(* [shift_left_borne a b] returns a new bound for [a << b].
+
+   [a] and [b] must be natural integer bounds, i.e. [Large] or [Pinfty]. *)
+let shift_left_borne a b =
+  match a, b with
+  | Large (a, exa), _ when Q.equal a Q.zero ->
+    (* Shifting zero by any amount is always zero. *)
+    Large (a, exa)
+  | Large (a, exa), Large (b, exb) -> (
+      let a = Q.to_bigint a and b = Q.to_bigint b in
+      match Z.to_int b with
+      | b -> Large (Q.of_bigint (Z.shift_left a b), Ex.union exa exb)
+      | exception Z.Overflow -> Pinfty
+    )
+  | Pinfty, (Large _ | Pinfty)
+  | Large _, Pinfty ->
+    (* The case [a = 0] is treated above. *)
+    Pinfty
+  | (Minfty | Strict _), _
+  | _, (Minfty | Strict _) -> assert false
+
+type 'a star = Neg_infinite | Finite of 'a | Pos_infinite
+
+let compare_star compare n1 n2 =
+  match n1, n2 with
+  | Neg_infinite, Neg_infinite -> 0
+  | Neg_infinite, (Finite _ | Pos_infinite) -> -1
+  | (Finite _ | Pos_infinite), Neg_infinite -> 1
+
+  | Finite n1, Finite n2 -> compare n1 n2
+  | Finite _, Pos_infinite -> -1
+  | Pos_infinite, Finite _ -> 1
+
+  | Pos_infinite, Pos_infinite -> 0
+
+let map_star f = function
+  | Neg_infinite -> Neg_infinite
+  | Finite x -> Finite (f x)
+  | Pos_infinite -> Pos_infinite
+
+let qstar_of_borne_inf lb =
+  match int_of_borne_inf lb with
+  | Large (lb, ex) -> Finite lb, ex
+  | Minfty -> Neg_infinite, Ex.empty
+  | Strict _ | Pinfty -> assert false
+
+let zstar_of_borne_inf lb =
+  let lb, ex = qstar_of_borne_inf lb in
+  map_star Q.to_bigint lb, ex
+
+let qstar_of_borne_sup ub =
+  match int_of_borne_sup ub with
+  | Large (ub, ex) -> Finite ub, ex
+  | Pinfty -> Pos_infinite, Ex.empty
+  | Strict _ | Minfty -> assert false
+
+let zstar_of_borne_sup ub =
+  let ub, ex = qstar_of_borne_sup ub in
+  map_star Q.to_bigint ub, ex
+
+let borne_of_qstar ~ex = function
+  | Neg_infinite -> Minfty
+  | Finite q -> Large (q, ex)
+  | Pos_infinite -> Pinfty
+
+type polarity = Positive | Negative
+
+let apply_polarity pol (lb, ub) =
+  match pol with
+  | Positive -> (lb, ub)
+  | Negative -> (ub, lb)
+
+let (~+) x = (Positive, x)
+
+let (~-) x = (Negative, x)
+
+let map2_monotone f (pol1, uints1) (pol2, uints2) =
+  assert (Bool.equal uints1.is_int uints2.is_int);
+  let ints =
+    List.fold_left (fun l bnds1 ->
+        let lb1, ub1 = apply_polarity pol1 bnds1 in
+        let lb1, lb1_ex = qstar_of_borne_inf lb1 in
+        let ub1, ub1_ex = qstar_of_borne_sup ub1 in
+        List.fold_left (fun l bnds2 ->
+            let lb2, ub2 = apply_polarity pol2 bnds2 in
+            let lb2, lb2_ex = qstar_of_borne_inf lb2 in
+            let ub2, ub2_ex = qstar_of_borne_sup ub2 in
+            let lb = f lb1 lb2 in
+            let lb_ex = Ex.union lb1_ex lb2_ex in
+            let ub = f ub1 ub2 in
+            let ub_ex = Ex.union ub1_ex ub2_ex in
+            assert (compare_star Q.compare lb ub <= 0);
+            (borne_of_qstar ~ex:lb_ex lb , borne_of_qstar ~ex:ub_ex ub) :: l
+          ) l uints2.ints
+      ) [] uints1.ints
+  in
+  let res =
+    union_intervals
+      { ints
+      ; is_int = uints1.is_int
+      ; expl = Ex.union uints1.expl uints2.expl }
+  in
+  assert (res.ints != []);
+  res
+
+let map2_monotone_bigint f x y =
+  map2_monotone (fun x y ->
+      map_star Q.of_bigint @@
+      f (map_star Q.to_bigint x) (map_star Q.to_bigint y)
+    ) x y
+
+let is_nstar = function
+  | Neg_infinite -> false
+  | Finite n -> Z.compare n Z.zero >= 0
+  | Pos_infinite -> true
+
+let lshr_nstar x y =
+  assert (is_nstar x && is_nstar y);
+  match x, y with
+  | Neg_infinite, _ | _, Neg_infinite -> assert false
+
+  | Pos_infinite, _ -> Pos_infinite
+  | _, Pos_infinite -> Finite Z.zero
+
+  | Finite x, Finite y ->
+    match Z.to_int y with
+    | y -> Finite (Z.shift_right x y)
+    | exception Z.Overflow -> Finite Z.zero
+
+let lshr x y =
+  map2_monotone_bigint lshr_nstar ~+x ~-y
+
+let bvudiv_b a b =
+  match a, b with
+  | Large (a, ex_a), Large (b, ex_b) ->
+    assert (Q.compare b Q.zero > 0);
+    let a = Q.to_bigint a and b = Q.to_bigint b in
+    Large (Q.of_bigint @@ Z.div a b, Ex.union ex_a ex_b)
+  | _ -> assert false
+
+let bvudiv sz x y =
+  assert (x.is_int && y.is_int);
+  let mone = Q.of_bigint @@ Z.extract Z.minus_one 0 sz in
+  (* |-1| is always a valid upper bound *)
+  let mone_ub = Large (mone, Ex.empty) in
+  let ints =
+    List.fold_left (fun acc (lb2, ub2) ->
+        let ub2 = int_of_borne_sup ub2 in
+        if zero_endpoint ub2 then
+          (* if ub2 is zero then y is zero and the result is always -1 *)
+          let mone_lb = Large (mone, explain_borne ub2) in
+          (mone_lb, mone_ub) :: acc
+        else
+          let lb2 = int_of_borne_inf lb2 in
+          List.fold_left (fun acc (lb1, ub1) ->
+              let lb1 = int_of_borne_inf lb1 in
+              let ub1 = int_of_borne_sup ub1 in
+              let lb = bvudiv_b lb1 ub2 in
+              if zero_endpoint lb2 then
+                (* if lb2 is zero y can be zero and the result can be -1 *)
+                match ub1 with
+                | Pinfty -> (lb, mone_ub) :: acc
+                | Large (ub1, _) when Q.compare ub1 mone >= 0 ->
+                  (lb, mone_ub) :: acc
+                | _ ->
+                  (* the gap between ub1 and -1 is explained by ub1 *)
+                  let mone_lb = Large (mone, explain_borne ub1) in
+                  (mone_lb, mone_ub):: (lb, ub1) :: acc
+              else
+                (lb, bvudiv_b ub1 lb2) :: acc
+            ) acc x.ints
+      ) [] y.ints
+  in
+  let res =
+    union_intervals
+      { ints
+      ; is_int = true
+      ; expl = Ex.union x.expl y.expl
+      }
+  in
+  assert (res.ints != []);
+  res
+
+
 (** Apply function [f] to the interval.
 
     [f] *MUST* be monotone (either increasing or decreasing depending on the
@@ -1317,6 +1526,64 @@ let extract uints ~ofs ~len =
 
 let extract uints i j =
   extract uints ~ofs:i ~len:(j - i + 1)
+
+(* [shl sz uints1 uints2] computes [(uints1 << uints2) mod 2^sz] *)
+let bvshl sz uints1 uints2 =
+  assert (uints1.is_int && uints2.is_int);
+  (* zero is always a valid lower bound *)
+  let zero_lb = Large (Q.zero, Ex.empty) in
+  let ints =
+    List.fold_left (fun acc (lb2, ub2) ->
+        let lb2 = int_of_borne_inf lb2 in
+        if shl_overflows sz lb2 then
+          (* if lb2 is >= sz, the result is always zero, independent of ub2 and
+             the whole interval [uints1] *)
+          let zero_ub = Large (Q.zero, explain_borne lb2) in
+          (zero_lb, zero_ub) :: acc
+        else
+          let ub2 = int_of_borne_sup ub2 in
+          List.fold_left (fun acc (lb1, ub1) ->
+              let lb1 = int_of_borne_inf lb1 in
+              (* lb can only be infinite if [shl_overflows sz lb2] holds *)
+              let lb = shift_left_borne lb1 lb2 in
+              assert (lb != Pinfty);
+              let ub1 = int_of_borne_sup ub1 in
+              let ub =
+                if shl_overflows sz ub2 then
+                  (* Not needed for correctness, important for performance
+                      otherwise we compute huge shifts for naught *)
+                  Pinfty
+                else
+                  shift_left_borne ub1 ub2
+              in
+              if fits_bits sz ub then (
+                (* no overflow possible *)
+                assert (ub != Pinfty);
+                match lb with
+                | Large (lb, _) when Q.equal lb Q.zero ->
+                  (* zero is always a valid lower bound, skip the explanation *)
+                  (zero_lb, ub) :: acc
+                | _ ->
+                  (* must add ub's explanation to lb -- without ub's explanation
+                     we could have small values from overflow *)
+                  let lb = add_expl_to_borne lb (explain_borne ub) in
+                  (lb, ub) :: acc
+              ) else
+                (* overflow is possible *)
+                trunc_int_borne lb ub sz @ acc
+            ) acc uints1.ints
+      ) [] uints2.ints
+  in
+  let res =
+    union_intervals
+      { ints
+      ; is_int = true
+      ; expl = Ex.union uints1.expl uints2.expl
+      }
+  in
+  assert (res.ints != []);
+  res
+
 
 (*****************)
 

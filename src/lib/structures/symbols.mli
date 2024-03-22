@@ -47,8 +47,8 @@ type operator =
   | Concat
   | Extract of int * int (* lower bound * upper bound *)
   | BVnot | BVand | BVor | BVxor
-  | BVadd | BVsub | BVmul
-  | BVshl
+  | BVadd | BVsub | BVmul | BVudiv | BVurem
+  | BVshl | BVlshr
   | Int2BV of int | BV2Nat
   (* FP *)
   | Float
