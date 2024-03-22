@@ -469,7 +469,10 @@ module SmtPrinter = struct
       pp_rational ppf q
 
     | Sy.Bitv (n, s), [] ->
-      Fmt.pf ppf "#b%s" (Z.format (Fmt.str "%%0%db" n) s)
+      if n mod 4 = 0 && false then
+        Fmt.pf ppf "#x%s" (Z.format (Fmt.str "%%0%dx" (n / 4)) s)
+      else
+        Fmt.pf ppf "#b%s" (Z.format (Fmt.str "%%0%db" n) s)
 
     | Sy.MapsTo v, [t] ->
       Fmt.pf ppf "@[<2>(ae.mapsto %a %a@])" Var.print v pp t
@@ -2961,8 +2964,8 @@ module BV = struct
     | _ -> invalid_arg "of_bigint_like"
 
   (* Constant symbols for all zeros and all ones *)
-  let bvzero m = bitv (String.make m '0') (Tbitv m)
-  let bvones m = bitv (String.make m '1') (Tbitv m)
+  let bvzero m = of_bigint m Z.zero
+  let bvones m = of_bigint m Z.minus_one
 
   (* Helpers *)
   let b = function
@@ -3064,16 +3067,8 @@ module BV = struct
   let bvsub s t = mk_term (Op BVsub) [s; t] (type_info s)
   let bvneg s = bvsub (of_bigint_like s Z.zero) s
   let bvmul s t = mk_term (Op BVmul) [s; t] (type_info s)
-  let bvudiv s t =
-    let m = size2 s t in
-    ite (eq (bv2nat t) Ints.(~$0))
-      (bvones m)
-      (int2bv m Ints.(bv2nat s / bv2nat t))
-  let bvurem s t =
-    let m = size2 s t in
-    ite (eq (bv2nat t) Ints.(~$0))
-      s
-      (int2bv m Ints.(bv2nat s mod bv2nat t))
+  let bvudiv s t = mk_term (Op BVudiv) [s; t] (type_info s)
+  let bvurem s t = mk_term (Op BVurem) [s; t] (type_info s)
   let bvsdiv s t =
     let m = size2 s t in
     let msb_s = extract (m - 1) (m - 1) s in
@@ -3103,7 +3098,7 @@ module BV = struct
     let abs_s = ite (is msb_s 0) s (bvneg s) in
     let abs_t = ite (is msb_t 0) t (bvneg t) in
     let u = bvurem abs_s abs_t in
-    ite (eq (bv2nat u) Ints.(~$0))
+    ite (eq u (of_bigint_like u Z.zero))
       u
     @@ ite (and_ (is msb_s 0) (is msb_t 0))
       u
@@ -3115,7 +3110,7 @@ module BV = struct
 
   (* Shift operations *)
   let bvshl s t = mk_term (Op BVshl) [s; t] (type_info s)
-  let bvlshr s t = int2bv (size2 s t) Ints.(bv2nat s / (~$2 ** bv2nat t))
+  let bvlshr s t = mk_term (Op BVlshr) [s; t] (type_info s)
   let bvashr s t =
     let m = size2 s t in
     ite (is (extract (m - 1) (m - 1) s) 0)

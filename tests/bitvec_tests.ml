@@ -10,6 +10,8 @@ module IntSet : sig
 
   val map : (Z.t -> Z.t) -> t -> t
 
+  val map2 : (Z.t -> Z.t -> Z.t) -> t -> t -> t
+
   val mem : Z.t -> t -> bool
 end = struct
   type t = Z.t
@@ -51,6 +53,13 @@ end = struct
 
   let map f t =
     fold (fun n -> add (f n)) t empty
+
+  let map2 f s t =
+    fold (fun n ->
+        fold (fun m ->
+            add (f n m)
+          ) t
+      ) s empty
 end
 
 let of_interval =
@@ -215,3 +224,88 @@ let test_decrease_upper_bound sz =
 
 let () =
   Test.check_exn (test_decrease_upper_bound 3)
+
+let test_bitlist_binop ~count sz zop iop =
+  Test.make ~count
+    ~print:Print.(
+        pair
+          (Fmt.to_to_string Bitlist.pp)
+          (Fmt.to_to_string Bitlist.pp))
+    Gen.(pair (bitlist sz) (bitlist sz))
+    (fun (s, t) ->
+       IntSet.subset
+         (IntSet.map2 zop (of_bitlist s) (of_bitlist t))
+         (of_bitlist (iop s t)))
+
+let test_interval_binop ~count sz zop iop =
+  Test.make ~count
+    ~print:Print.(
+        pair
+          (Fmt.to_to_string Intervals.pretty_print)
+          (Fmt.to_to_string Intervals.pretty_print))
+    Gen.(pair (intervals sz) (intervals sz))
+    (fun (s, t) ->
+       IntSet.subset
+         (IntSet.map2 zop (of_interval s) (of_interval t))
+         (of_interval (iop s t)))
+
+let zmul sz a b =
+  Z.extract (Z.mul a b) 0 sz
+
+let test_bitlist_mul sz =
+  test_bitlist_binop ~count:1_000
+    sz (zmul sz) Bitlist.mul
+
+let () =
+  Test.check_exn (test_bitlist_mul 3)
+
+let zshl sz a b =
+  match Z.to_int b with
+  | b when b < sz -> Z.extract (Z.shift_left a b) 0 sz
+  | _ | exception Z.Overflow -> Z.zero
+
+let test_interval_shl sz =
+  test_interval_binop ~count:1_000
+    sz (zshl sz) (Intervals.bvshl sz)
+
+let () =
+  Test.check_exn (test_interval_shl 3)
+
+let test_bitlist_shl sz =
+  test_bitlist_binop ~count:1_000
+    sz (zshl sz) Bitlist.shl
+
+let () =
+  Test.check_exn (test_bitlist_shl 3)
+
+let zlshr a b =
+  match Z.to_int b with
+  | b -> Z.shift_right a b
+  | exception Z.Overflow -> Z.zero
+
+let test_interval_lshr sz =
+  test_interval_binop ~count:1_000
+    sz zlshr Intervals.lshr
+
+let () =
+  Test.check_exn (test_interval_lshr 3)
+
+let test_bitlist_lshr sz =
+  test_bitlist_binop ~count:1_000
+    sz zlshr Bitlist.lshr
+
+let () =
+  Test.check_exn (test_bitlist_lshr 3)
+
+let zudiv sz a b =
+  if Z.equal b Z.zero then
+    Z.extract Z.minus_one 0 sz
+  else
+    Z.div a b
+
+let test_interval_bvudiv sz =
+  test_interval_binop ~count:1_000
+    sz (zudiv sz) (Intervals.bvudiv sz)
+
+let () =
+  Test.check_exn (test_interval_bvudiv 3)

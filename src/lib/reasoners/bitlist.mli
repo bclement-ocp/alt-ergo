@@ -108,6 +108,15 @@ val logor : t -> t -> t
 val logxor : t -> t -> t
 (** Bitwise xor. *)
 
+val mul : t -> t -> t
+(** Multiplication. *)
+
+val shl : t -> t -> t
+(** Logical left shift. *)
+
+val lshr : t -> t -> t
+(** Logical right shift. *)
+
 val concat : t -> t -> t
 (** Bit-vector concatenation. *)
 

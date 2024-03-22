@@ -164,6 +164,21 @@ val extract : t -> int -> int -> t
     unbounded (in which case [extract s i j] returns the full interval
     [[0, 2^(j - i + 1) - 1]]). *)
 
+val bvshl : int -> t -> t -> t
+(** [shl sz s t] computes an overapproximation of the left shift [s lsl t],
+    truncating the result to [sz] bits.
+
+    [s] and [t] must only contain non-negative integers. *)
+
+val lshr : t -> t -> t
+(** [lshr s t] computes an approximation of the logical right shift [s lsr t].
+
+    Note that the result of logical right shift is independent of bit width.
+
+    [s] and [t] must only contain non-negative integers. *)
+
+val bvudiv : int -> t -> t -> t
+
 type interval_matching =
   ((Numbers.Q.t * bool) option * (Numbers.Q.t * bool) option * Ty.t)
     Var.Map.t
