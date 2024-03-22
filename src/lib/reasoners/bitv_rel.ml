@@ -362,8 +362,8 @@ end = struct
     | Budiv -> (* Only forward propagation for now *)
       update ~ex dr @@ Intervals.bvudiv sz !!dx !!dy
 
-    | Burem -> (* TODO *)
-      ()
+    | Burem -> (* Only forward propagation for now *)
+      update ~ex dr @@ Intervals.bvurem !!dx !!dy
 
     | Band | Bor | Bxor ->
       (* No interval propagation for bitwise operators yet *)

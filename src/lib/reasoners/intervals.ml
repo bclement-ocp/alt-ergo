@@ -1260,34 +1260,32 @@ let compare_star compare n1 n2 =
 
   | Pos_infinite, Pos_infinite -> 0
 
+let compare_zstar = compare_star Z.compare
+
+let is_zero_zstar = function
+  | Finite z when Z.equal z Z.zero -> true
+  | _ -> false
+
 let map_star f = function
   | Neg_infinite -> Neg_infinite
-  | Finite x -> Finite (f x)
+  | Finite n -> Finite (f n)
   | Pos_infinite -> Pos_infinite
 
-let qstar_of_borne_inf lb =
+let zstar_of_borne_inf lb =
   match int_of_borne_inf lb with
-  | Large (lb, ex) -> Finite lb, ex
+  | Large (lb, ex) -> Finite (Q.to_bigint lb), ex
   | Minfty -> Neg_infinite, Ex.empty
   | Strict _ | Pinfty -> assert false
 
-let zstar_of_borne_inf lb =
-  let lb, ex = qstar_of_borne_inf lb in
-  map_star Q.to_bigint lb, ex
-
-let qstar_of_borne_sup ub =
+let zstar_of_borne_sup ub =
   match int_of_borne_sup ub with
-  | Large (ub, ex) -> Finite ub, ex
+  | Large (ub, ex) -> Finite (Q.to_bigint ub), ex
   | Pinfty -> Pos_infinite, Ex.empty
   | Strict _ | Minfty -> assert false
 
-let zstar_of_borne_sup ub =
-  let ub, ex = qstar_of_borne_sup ub in
-  map_star Q.to_bigint ub, ex
-
-let borne_of_qstar ~ex = function
+let borne_of_zstar ~ex = function
   | Neg_infinite -> Minfty
-  | Finite q -> Large (q, ex)
+  | Finite z -> Large (Q.of_bigint z, ex)
   | Pos_infinite -> Pinfty
 
 type polarity = Positive | Negative
@@ -1306,18 +1304,18 @@ let map2_monotone f (pol1, uints1) (pol2, uints2) =
   let ints =
     List.fold_left (fun l bnds1 ->
         let lb1, ub1 = apply_polarity pol1 bnds1 in
-        let lb1, lb1_ex = qstar_of_borne_inf lb1 in
-        let ub1, ub1_ex = qstar_of_borne_sup ub1 in
+        let lb1, lb1_ex = zstar_of_borne_inf lb1 in
+        let ub1, ub1_ex = zstar_of_borne_sup ub1 in
         List.fold_left (fun l bnds2 ->
             let lb2, ub2 = apply_polarity pol2 bnds2 in
-            let lb2, lb2_ex = qstar_of_borne_inf lb2 in
-            let ub2, ub2_ex = qstar_of_borne_sup ub2 in
+            let lb2, lb2_ex = zstar_of_borne_inf lb2 in
+            let ub2, ub2_ex = zstar_of_borne_sup ub2 in
             let lb = f lb1 lb2 in
             let lb_ex = Ex.union lb1_ex lb2_ex in
             let ub = f ub1 ub2 in
             let ub_ex = Ex.union ub1_ex ub2_ex in
-            assert (compare_star Q.compare lb ub <= 0);
-            (borne_of_qstar ~ex:lb_ex lb , borne_of_qstar ~ex:ub_ex ub) :: l
+            assert (compare_zstar lb ub <= 0);
+            (borne_of_zstar ~ex:lb_ex lb , borne_of_zstar ~ex:ub_ex ub) :: l
           ) l uints2.ints
       ) [] uints1.ints
   in
@@ -1329,12 +1327,6 @@ let map2_monotone f (pol1, uints1) (pol2, uints2) =
   in
   assert (res.ints != []);
   res
-
-let map2_monotone_bigint f x y =
-  map2_monotone (fun x y ->
-      map_star Q.of_bigint @@
-      f (map_star Q.to_bigint x) (map_star Q.to_bigint y)
-    ) x y
 
 let is_nstar = function
   | Neg_infinite -> false
@@ -1355,7 +1347,7 @@ let lshr_nstar x y =
     | exception Z.Overflow -> Finite Z.zero
 
 let lshr x y =
-  map2_monotone_bigint lshr_nstar ~+x ~-y
+  map2_monotone lshr_nstar ~+x ~-y
 
 let bvudiv_b a b =
   match a, b with
@@ -1408,6 +1400,53 @@ let bvudiv sz x y =
   assert (res.ints != []);
   res
 
+let bvurem x y =
+  assert (x.is_int && y.is_int);
+  let zero_lb = Large (Q.zero, Ex.empty) in
+  let ints =
+    List.fold_left (fun acc (lb2, ub2) ->
+        let lb2, ex_lb2 = zstar_of_borne_inf lb2 in
+        let ub2, ex_ub2 = zstar_of_borne_sup ub2 in
+        List.fold_left (fun acc (lb1, ub1) ->
+            let lb1, ex_lb1 = zstar_of_borne_inf lb1 in
+            let ub1, ex_ub1 = zstar_of_borne_sup ub1 in
+            if is_zero_zstar ub2 then
+              (* y is always zero -> identity *)
+              let lb = borne_of_zstar ~ex:(Ex.union ex_lb1 ex_ub2) lb1 in
+              let ub = borne_of_zstar ~ex:(Ex.union ex_ub1 ex_ub2) ub1 in
+              (lb, ub) :: acc
+            else
+            if compare_zstar ub1 lb2 < 0 then
+              (* if x < y bvurem is the identity; need to add the justification
+                 for the x < y inequality to the bounds *)
+              let ex = Ex.union ex_ub1 ex_lb2 in
+              let lb = borne_of_zstar ~ex:(Ex.union ex_lb1 ex) lb1 in
+              let ub = borne_of_zstar ~ex:(Ex.union ex_ub1 ex) ub1 in
+              (lb, ub) :: acc
+            else if is_zero_zstar lb2 || compare_zstar ub1 ub2 < 0 then
+              (* the range [0, ub1] is always valid
+                 it is also the best we can do if y can be zero or can be bigger
+                 than x *)
+              let ub = borne_of_zstar ~ex:ex_ub1 ub1 in
+              (zero_lb, ub) :: acc
+            else
+              (* y is non-zero (ex_lb2) ; [0, ub2 - 1[ is valid *)
+              let ub =
+                borne_of_zstar ~ex:(Ex.union ex_lb2 ex_ub2)
+                  (map_star Z.pred ub2)
+              in
+              (zero_lb, ub) :: acc
+          ) acc x.ints
+      ) [] y.ints
+  in
+  let res =
+    union_intervals
+      { ints
+      ; is_int = x.is_int
+      ; expl = Ex.union x.expl y.expl }
+  in
+  assert (res.ints != []);
+  res
 
 (** Apply function [f] to the interval.
 
