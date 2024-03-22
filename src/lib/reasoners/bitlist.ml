@@ -264,13 +264,13 @@ let mul a b =
   (* (a * 2^n) * (b * 2^m) = (a * b) * 2^(n + m) *)
   let zeroes_a = Z.trailing_zeros @@ Z.lognot a.bits_clr in
   let zeroes_b = Z.trailing_zeros @@ Z.lognot b.bits_clr in
-  let low_bits =
-    if zeroes_a + zeroes_b = 0 then empty
-    else exact (zeroes_a + zeroes_b) Z.zero ex
-  in
-  if width low_bits >= sz then
-    low_bits
+  if zeroes_a + zeroes_b >= sz then
+    exact sz Z.zero ex
   else
+    let low_bits =
+      if zeroes_a + zeroes_b = 0 then empty
+      else exact (zeroes_a + zeroes_b) Z.zero ex
+    in
     let a = extract a zeroes_a (zeroes_a + sz - width low_bits - 1) in
     assert (width a + width low_bits = sz);
     let b = extract b zeroes_b (zeroes_b + sz - width low_bits - 1) in
