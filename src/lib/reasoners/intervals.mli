@@ -179,6 +179,8 @@ val lshr : t -> t -> t
 
 val bvudiv : int -> t -> t -> t
 
+val bvurem : t -> t -> t
+
 type interval_matching =
   ((Numbers.Q.t * bool) option * (Numbers.Q.t * bool) option * Ty.t)
     Var.Map.t

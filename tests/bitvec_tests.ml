@@ -309,3 +309,16 @@ let test_interval_bvudiv sz =
 
 let () =
   Test.check_exn (test_interval_bvudiv 3)
+
+let zurem a b =
+  if Z.equal b Z.zero then
+    a
+  else
+    Z.rem a b
+
+let test_interval_bvurem sz =
+  test_interval_binop ~count:1_000
+    sz zurem Intervals.bvurem
+
+let () =
+  Test.check_exn (test_interval_bvurem 3)
