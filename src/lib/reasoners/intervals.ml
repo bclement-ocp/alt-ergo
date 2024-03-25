@@ -30,13 +30,13 @@
 
 module Ex = Explanation
 
-type 'a borne =
-  | Strict of ('a * Ex.t)
-  | Large of ('a * Ex.t)
+type borne =
+  | Strict of (Q.t * Ex.t)
+  | Large of (Q.t * Ex.t)
   | Pinfty | Minfty
 
 type t = {
-  ints : (Q.t borne * Q.t borne) list;
+  ints : (borne * borne) list;
   is_int : bool;
   expl: Ex.t
 }
@@ -264,9 +264,9 @@ let neg_borne b = match b with
 
 (* TODO: generalize the use of this type and the function joint below
    to other operations on intervals *)
-type 'a kind =
+type kind =
   | Empty of Explanation.t
-  | Int of ('a borne * 'a borne)
+  | Int of (borne * borne)
 
 let join l glob_ex = (* l should not be empty *)
   let rec j_aux _todo _done =
