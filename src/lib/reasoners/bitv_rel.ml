@@ -598,172 +598,277 @@ end = struct
   let propagate_interval ~ex c dom =
     propagate_interval_repr ~ex dom c.repr
 
-  let simplify_binop acts op r x y =
-    let bitwidth r =
-      match X.type_info r with Tbitv n -> n | _ -> assert false
-    in
-    let acts_add_const r z =
-      let sz = bitwidth r in
-      acts.Rel_utils.acts_add_eq r
-        (Shostak.Bitv.is_mine [ { bv = Cte (Z.extract z 0 sz); sz }])
-    in
-    let acts_add_zero r = acts_add_const r Z.zero in
-    let const_value x =
-      match Shostak.Bitv.embed x with
-      | [ { bv = Cte n; _ } ] -> n
-      | _ -> invalid_arg "const_value"
-    in
-    let acts_add_shl r x y =
-      let sz = bitwidth r in
-      match Z.to_int y with
-      | 0 -> acts.acts_add_eq r x
-      | n when n < sz ->
-        assert (n > 0);
-        let r_bitv = Shostak.Bitv.embed r in
-        let high_bits =
-          Shostak.Bitv.is_mine @@
-          Bitv.extract sz 0 (sz - 1 - n) (Shostak.Bitv.embed x)
-        in
-        acts.acts_add_eq
-          (Shostak.Bitv.is_mine @@ Bitv.extract sz n (sz - 1) r_bitv)
-          high_bits;
-        acts_add_zero
-          (Shostak.Bitv.is_mine @@ Bitv.extract sz 0 (n - 1) r_bitv)
-      | _ | exception Z.Overflow ->
-        acts_add_zero r
-    in
-    let acts_add_lshr r x y =
-      let sz = bitwidth r in
-      match Z.to_int y with
-      | 0 -> acts.acts_add_eq r x
-      | n when n < sz ->
-        assert (n > 0);
-        let r_bitv = Shostak.Bitv.embed r in
-        let low_bits =
-          Shostak.Bitv.is_mine @@
-          Bitv.extract sz n (sz - 1) (Shostak.Bitv.embed x)
-        in
-        acts.acts_add_eq
-          (Shostak.Bitv.is_mine @@ Bitv.extract sz 0 (sz - 1 - n) r_bitv)
-          low_bits;
-        acts_add_zero
-          (Shostak.Bitv.is_mine @@ Bitv.extract sz (sz - n) (sz - 1) r_bitv)
-      | _ | exception Z.Overflow ->
-        acts_add_zero r
-    in
+  let bitwidth r =
+    match X.type_info r with Tbitv n -> n | _ -> assert false
+
+  let const sz n =
+    Shostak.Bitv.is_mine [ { bv = Cte (Z.extract n 0 sz); sz } ]
+
+  let cast ty n =
+    match ty with
+    | Ty.Tbitv sz -> const sz n
+    | _ -> invalid_arg "cast"
+
+  let value x =
+    match Shostak.Bitv.embed x with
+    | [ { bv = Cte n; _ } ] -> n
+    | _ -> invalid_arg "const_value"
+
+  (* Add the constraint: r = x *)
+  let add_eq acts r x =
+    acts.Rel_utils.acts_add_eq r x
+
+  (* Add the constraint: r = c *)
+  let add_eq_const acts r c =
+    add_eq acts r @@ const (bitwidth r) c
+
+  (* Add the constraint: r = x & c *)
+  let add_and_const acts r x c =
+    (* TODO: apply to extractions for any [c]? Could be expensive for Shostak *)
+    if Z.equal c Z.zero then (
+      add_eq_const acts r Z.zero;
+      true
+    ) else if Z.equal c (Z.extract Z.minus_one 0 (bitwidth r)) then (
+      add_eq acts r x;
+      true
+    ) else
+      false
+
+  (* Add the constraint: r = x | c *)
+  let add_or_const acts r x c =
+    (* TODO: apply to extractions for any [c]? Could be expensive for Shostak *)
+    if Z.equal c Z.zero then (
+      add_eq acts r x;
+      true
+    ) else if Z.equal c (Z.extract Z.minus_one 0 (bitwidth r)) then (
+      add_eq_const acts r Z.minus_one;
+      true
+    ) else
+      false
+
+  (* Add the constraint: r = x ^ c *)
+  let add_xor_const acts r x c =
+    (* TODO: apply to extractions for any [c]? Could be expensive for Shostak *)
+    if Z.equal c Z.zero then (
+      add_eq acts r
+        (Shostak.Bitv.is_mine @@ Bitv.lognot @@ Shostak.Bitv.embed x);
+      true
+    ) else if Z.equal c (Z.extract Z.minus_one 0 (bitwidth r)) then (
+      add_eq acts r x;
+      true
+    ) else
+      false
+
+  (* Add the constraint: r = x + c *)
+  let add_add_const acts r x c =
+    let sz = bitwidth r in
+    if Z.equal c Z.zero then (
+      add_eq acts r x;
+      true
+    ) else if X.is_constant r then (
+      (* c1 = x + c2 -> x = c1 - c2 *)
+      add_eq_const acts x Z.(value r - c);
+      true
+    ) else if Z.testbit c (sz - 1) then
+      if Z.popcount c = 1 then
+        (* INT_MIN is special because -INT_MIN = INT_MIN and so
+            r = x + INT_MIN
+           and
+            x = r + INT_MIN
+           are actually equivalent, so we just pick a normalized order between x
+           and r. *)
+        if X.hash_cmp r x > 0 then (
+          acts.acts_add_constraint (bvadd x r (const (bitwidth r) c));
+          true
+        ) else
+          false
+      else
+        (* r = x - c -> x = r + c (mod 2^sz) *)
+        let c = Z.neg @@ Z.signed_extract c 0 sz in
+        assert (Z.sign c > 0 && not (Z.testbit c sz));
+        acts.acts_add_constraint (bvadd x r (const sz c));
+        true
+    else
+      false
+
+  (* Add the constraint: r = x << c *)
+  let add_shl_const acts r x c =
+    let sz = bitwidth r in
+    match Z.to_int c with
+    | 0 -> add_eq acts r x
+    | n when n < sz ->
+      assert (n > 0);
+      let r_bitv = Shostak.Bitv.embed r in
+      let high_bits =
+        Shostak.Bitv.is_mine @@
+        Bitv.extract sz 0 (sz - 1 - n) (Shostak.Bitv.embed x)
+      in
+      add_eq acts
+        (Shostak.Bitv.is_mine @@ Bitv.extract sz n (sz - 1) r_bitv)
+        high_bits;
+      add_eq_const acts
+        (Shostak.Bitv.is_mine @@ Bitv.extract sz 0 (n - 1) r_bitv)
+        Z.zero
+    | _ | exception Z.Overflow ->
+      add_eq_const acts r Z.zero
+
+  (* Add the constraint: r = x * c *)
+  let add_mul_const acts r x c =
+    if Z.equal c Z.zero then (
+      add_eq_const acts r Z.zero;
+      true
+    ) else if Z.popcount c = 1 then (
+      let ofs = Z.numbits c - 1 in
+      add_shl_const acts r x (Z.of_int ofs);
+      true
+    ) else
+      false
+
+  (* Add the constraint: r = x >> c *)
+  let add_lshr_const acts r x c =
+    let sz = bitwidth r in
+    match Z.to_int c with
+    | 0 -> add_eq acts r x
+    | n when n < sz ->
+      assert (n > 0);
+      let r_bitv = Shostak.Bitv.embed r in
+      let low_bits =
+        Shostak.Bitv.is_mine @@
+        Bitv.extract sz n (sz - 1) (Shostak.Bitv.embed x)
+      in
+      add_eq acts
+        (Shostak.Bitv.is_mine @@ Bitv.extract sz 0 (sz - 1 - n) r_bitv)
+        low_bits;
+      add_eq_const acts
+        (Shostak.Bitv.is_mine @@ Bitv.extract sz (sz - n) (sz - 1) r_bitv)
+        Z.zero
+    | _ | exception Z.Overflow ->
+      add_eq_const acts r Z.zero
+
+  (* Ground evaluation rules for binary operators. *)
+  let eval_binop op ty x y =
     match op with
-    | Band when X.is_constant x && X.is_constant y ->
-      acts_add_const r Z.(const_value x land const_value y); true
-    | Bor when X.is_constant x && X.is_constant y ->
-      acts_add_const r Z.(const_value x lor const_value y); true
-
-    | Band | Bor when X.equal x y ->
-      acts.acts_add_eq r x; true
-
-    | Band | Bor -> false
-
-    | Bxor ->
-      (* r ^ x ^ x = 0 <-> r = 0 *)
-      if X.equal x y then (
-        acts_add_zero r; true
-      ) else if X.equal r x then (
-        acts_add_zero y; true
-      ) else if X.equal r y then (
-        acts_add_zero x; true
-      ) else if X.is_constant y then
-        if X.is_constant x then (
-          acts_add_const r Z.(const_value x lxor const_value y); true
-        ) else if X.is_constant r then (
-          acts_add_const x Z.(const_value r lxor const_value y); true
-        ) else
-          (* r ^ x = cte *)
-          false
-      else if X.is_constant x then
-        if X.is_constant r then (
-          acts_add_const y Z.(const_value x lxor const_value r); true
-        ) else
-          (* r ^ y = cte *)
-          false
+    | Band -> cast ty @@ Z.logand x y
+    | Bor -> cast ty @@ Z.logor x y
+    | Bxor -> cast ty @@ Z.logxor x y
+    | Badd -> cast ty @@ Z.add x y
+    | Bmul -> cast ty @@ Z.mul x y
+    | Budiv ->
+      if Z.equal y Z.zero then
+        cast ty Z.minus_one
       else
-        false
+        cast ty @@ Z.div x y
+    | Burem ->
+      if Z.equal y Z.zero then
+        cast ty x
+      else
+        cast ty @@ Z.rem x y
+    | Bshl -> (
+        match ty, Z.to_int y with
+        | Tbitv sz, y when y < sz ->
+          cast ty @@ Z.shift_left x y
+        | _ | exception Z.Overflow -> cast ty Z.zero
+      )
+    | Blshr -> (
+        match ty, Z.to_int y with
+        | Tbitv sz, y when y < sz ->
+          cast ty @@ Z.shift_right x y
+        | _ | exception Z.Overflow -> cast ty Z.zero
+      )
 
+  (* Constant simplification rules for binary operators.
+
+     The case where all arguments are constant and the function can be fully
+     evaluated is assumed to be dealt with prior to calling this function.
+
+     Algebraic rules (e.g. x & x = x) are in [rw_binop_algebraic].*)
+  let rw_binop_const acts op r x y =
+    (* NB: for commutative operators, arguments are sorted, so the second
+       argument can only be constant if the first argument also is constant. *)
+    match op with
+    | Band when X.is_constant x ->
+      add_and_const acts r y (value x)
+    | Band when X.is_constant y ->
+      add_and_const acts r x (value y)
+    | Band -> false
+
+    | Bor when X.is_constant x ->
+      add_or_const acts r y (value x)
+    | Bor when X.is_constant y ->
+      add_or_const acts r x (value y)
+    | Bor -> false
+
+    | Bxor when X.is_constant x ->
+      add_xor_const acts r y (value x)
+    | Bxor when X.is_constant y ->
+      add_xor_const acts r x (value y)
+    | Bxor when X.is_constant r ->
+      add_xor_const acts x y (value r)
+    | Bxor -> false
+
+    | Badd when X.is_constant x ->
+      add_add_const acts r y (value x)
+    | Badd when X.is_constant y ->
+      add_add_const acts r x (value y)
     | Badd ->
-      if X.equal x y then (
-        (* r = x + x -> r = 2x -> r = x << 1 *)
-        acts_add_shl r x Z.one; true
-      ) else if X.equal r x then (
-        (* x = x + y -> y = 0 *)
-        acts_add_zero y; true
-      ) else if X.equal r y then (
-        (* y = x + y -> x = 0 *)
-        acts_add_zero x; true
-      ) else if X.is_constant x then
-        if X.is_constant y then (
-          acts_add_const r Z.(const_value x + const_value y); true
-        ) else if X.is_constant r then (
-          acts_add_const y Z.(const_value r - const_value x); true
-        ) else if Z.equal (const_value x) Z.zero then (
-          (* r = 0 + y -> r = y *)
-          acts.acts_add_eq r y; true
-        ) else
-          (* r - y = cte *)
-          false
-      else if X.is_constant y then
-        if X.is_constant r then (
-          acts_add_const x Z.(const_value r - const_value y); true
-        ) else if Z.equal (const_value y) Z.zero then (
-          (* r = x + 0 -> r = x *)
-          acts.acts_add_eq r x; true
-        ) else
-          (* r - x = cte *)
-          false
-      else
-        false
+      false
 
-    | Bmul ->
-      if X.is_constant x then
-        if X.is_constant y then (
-          acts_add_const r Z.(const_value x * const_value y); true
-        ) else if Z.equal (const_value x) Z.one then (
-          acts.acts_add_eq r y; true
-        ) else if Z.equal (const_value x) Z.zero then (
-          acts_add_zero r; true
-        ) else
-          false
-      else if X.is_constant y then
-        if Z.equal (const_value y) Z.one then (
-          acts.acts_add_eq r x; true
-        ) else if Z.equal (const_value y) Z.zero then (
-          acts_add_zero r; true
-        ) else
-          false
-      else
-        false
+    | Bmul when X.is_constant x ->
+      add_mul_const acts r y (value x)
+    | Bmul when X.is_constant y ->
+      add_mul_const acts r x (value y)
+    | Bmul -> false
 
-    | Budiv when X.is_constant y && Z.equal (const_value y) Z.zero ->
-      acts_add_const r (Z.extract Z.minus_one 0 (bitwidth r)); true
-
-    | Budiv when X.is_constant x && X.is_constant y ->
-      acts_add_const r Z.(const_value x / const_value y); true
-
-    | Budiv -> false
-
-    | Burem when X.is_constant y && Z.equal (const_value y) Z.zero ->
-      acts.acts_add_eq r x; true
-
-    | Burem when X.is_constant x && X.is_constant y ->
-      acts_add_const r Z.(const_value x mod const_value y); true
-
-    | Burem -> false
+    | Budiv | Burem -> false
 
     (* shifts becomes a simple extraction when we know the right-hand side *)
     | Bshl when X.is_constant y ->
-      acts_add_shl r x (const_value y); true
+      add_shl_const acts r x (value y);
+      true
+    | Bshl -> false
 
     | Blshr when X.is_constant y ->
-      acts_add_lshr r x (const_value y); true
+      add_lshr_const acts r x (value y);
+      true
+    | Blshr -> false
 
-    | Bshl | Blshr -> false
+  (* Algebraic rewrite rules for binary operators.
+
+     Rules based on constant simplifications are in [rw_binop_const]. *)
+  let rw_binop_algebraic acts op r x y =
+    match op with
+    (* x & x = x ; x | x = x *)
+    | Band | Bor when X.equal x y ->
+      add_eq acts r x; true
+
+    (* r ^ x ^ x = 0 <-> r = 0 *)
+    | Bxor when X.equal x y ->
+      add_eq_const acts r Z.zero; true
+    | Bxor when X.equal r x ->
+      add_eq_const acts y Z.zero; true
+    | Bxor when X.equal r y ->
+      add_eq_const acts x Z.zero; true
+
+    | Badd when X.equal x y ->
+      (* r = x + x -> r = 2x -> r = x << 1 *)
+      add_shl_const acts r x Z.one; true
+    | Badd when X.equal r x ->
+      (* x = x + y -> y = 0 *)
+      add_eq_const acts y Z.zero; true
+    | Badd when X.equal r y ->
+      (* y = x + y -> x = 0 *)
+      add_eq_const acts x Z.zero; true
+
+    | _ -> false
+
+  let simplify_binop acts op r x y =
+    if X.is_constant x && X.is_constant y then (
+      add_eq acts r @@
+      eval_binop op (X.type_info r) (value x) (value y);
+      true
+    ) else
+      rw_binop_const acts op r x y ||
+      rw_binop_algebraic acts op r x y
 
   let simplify_fun_t acts r = function
     | Fbinop (op, x, y) -> simplify_binop acts op r x y
