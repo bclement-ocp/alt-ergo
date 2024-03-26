@@ -650,11 +650,11 @@ end = struct
   let add_xor_const acts r x c =
     (* TODO: apply to extractions for any [c]? Could be expensive for Shostak *)
     if Z.equal c Z.zero then (
-      add_eq acts r
-        (Shostak.Bitv.is_mine @@ Bitv.lognot @@ Shostak.Bitv.embed x);
+      add_eq acts r x;
       true
     ) else if Z.equal c (Z.extract Z.minus_one 0 (bitwidth r)) then (
-      add_eq acts r x;
+      add_eq acts r
+        (Shostak.Bitv.is_mine @@ Bitv.lognot @@ Shostak.Bitv.embed x);
       true
     ) else
       false
