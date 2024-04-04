@@ -737,10 +737,6 @@ module Constraint : sig
 
   val bvlshr : X.r -> X.r -> X.r -> t
   (** [bvshl r x y] is the constraint [r = x >> y] *)
-
-  val bvule : X.r -> X.r -> t
-
-  val bvugt : X.r -> X.r -> t
 end = struct
   type binop =
     (* Bitwise operations *)
@@ -917,9 +913,6 @@ end = struct
   let crel r = hcons @@ Crel r
 
   let cbinrel op x y = crel (Rbinrel (op, x, y))
-
-  let bvule = cbinrel Rule
-  let bvugt = cbinrel Rugt
 
   let equal c1 c2 = c1.tag = c2.tag
 
@@ -1877,7 +1870,7 @@ let simplify_all uf eqs touched (dom, idom) =
         ) c.value (dom, idom)
     ) to_add (dom, idom)
 
-let rec propagate_all uf eqs bdom idom =
+let rec propagate_all uf eqs bdom idom delta =
   (* Optimization to avoid unnecessary allocations *)
   let do_bitlist = Bitlist_domains.needs_propagation bdom in
   let do_intervals = Interval_domains.needs_propagation idom in
@@ -1967,9 +1960,26 @@ let rec propagate_all uf eqs bdom idom =
     let eqs, (bdom, idom) = simplify_all uf eqs seen_constraints (bdom, idom) in
 
     (* Propagate again in case constraints were simplified. *)
-    propagate_all uf eqs bdom idom
+    propagate_all uf eqs bdom idom delta
   else
-    eqs, bdom, idom
+    eqs, bdom, idom, delta
+
+module DX = struct
+  include Delta.X.Persistent
+
+  exception Inconsistent = Negative_cycle
+
+  type _ Uf.id += Id : t Uf.id
+
+  let filter_ty = is_bv_ty
+
+  let init _ t =
+    (* Variables are added dynamically when constraints apply. *)
+    t
+
+  let subst ~ex rr nrr t =
+    add_delta_eq t rr nrr Z.zero ex
+end
 
 type t =
   { terms : SX.t
@@ -1981,7 +1991,31 @@ let empty uf =
   Uf.GlobalDomains.add (module BV2Nat) BV2Nat.empty @@
   Uf.GlobalDomains.add (module Bitlist_domains) Bitlist_domains.empty @@
   Uf.GlobalDomains.add (module Interval_domains) Interval_domains.empty @@
+  Uf.GlobalDomains.add (module DX) DX.empty @@
   Uf.domains uf
+
+let add_delta_le ~ex delta x y k =
+  match Shostak.Bitv.embed x, Shostak.Bitv.embed y with
+  | [ { bv = Cte x; _ } ], [ { bv = Cte y; _ } ] ->
+    assert (Z.compare x (Z.add y k) <= 0);
+    delta
+  | [ { bv = Cte n; _ } ], _ ->
+    (* n <= y + k <-> n - k <= y *)
+    DX.add_lower_bound delta y (Z.sub n k) ex
+  | _, [ { bv = Cte n; _ } ] ->
+    (* x <= n + k *)
+    DX.add_upper_bound delta x (Z.add n k) ex
+  | _ ->
+    (* x <= y + k *)
+    DX.add_delta_le delta x y k ex
+
+let add_bvule ~ex delta x y =
+  (* x <= y <-> x <= y + 0 *)
+  add_delta_le ~ex delta x y Z.zero
+
+let add_bvugt ~ex delta x y =
+  (* x > y <-> y <= x - 1 *)
+  add_delta_le ~ex delta y x Z.minus_one
 
 let assume env uf la =
   let ds = Uf.domains uf in
@@ -1990,11 +2024,12 @@ let assume env uf la =
   let int_domain =
     Uf.GlobalDomains.find (module Interval_domains) ds
   in
-  let (domain, int_domain, eqs, size_splits) =
+  let delta = Uf.GlobalDomains.find (module DX) ds in
+  let (domain, int_domain, eqs, delta, size_splits) =
     try
-      let (domain, int_domain, eqs, size_splits) =
+      let (domain, int_domain, delta, eqs, size_splits) =
         List.fold_left
-          (fun (domain, int_domain, eqs, ss) (a, _root, ex, orig) ->
+          (fun (domain, int_domain, delta, eqs, ss) (a, _root, ex, orig) ->
              let ss =
                match orig with
                | Th_util.CS (Th_bitv, n) -> Q.(ss * n)
@@ -2010,20 +2045,13 @@ let assume env uf la =
                let x, exx = Uf.find_r uf x in
                let y, exy = Uf.find_r uf y in
                let ex = Ex.union ex @@ Ex.union exx exy in
-               let c =
+               let delta =
                  if is_true then
-                   Constraint.bvule x y
+                   add_bvule ~ex delta x y
                  else
-                   Constraint.bvugt x y
+                   add_bvugt ~ex delta x y
                in
-               (* Only watch comparisons on the interval domain since we don't
-                  propagate them in the bitlist domain. . *)
-               let int_domain =
-                 Interval_domains.watch (explained ~ex c) x @@
-                 Interval_domains.watch (explained ~ex c) y @@
-                 int_domain
-               in
-               (domain, int_domain, eqs, ss)
+               (domain, int_domain, delta, eqs, ss)
              | L.Distinct (false, [rr; nrr]), _ when is_1bit rr ->
                (* We don't (yet) support [distinct] in general, but we must
                   support it for case splits to avoid looping.
@@ -2033,13 +2061,13 @@ let assume env uf la =
                let not_nrr =
                  Shostak.Bitv.is_mine (Bitv.lognot (Shostak.Bitv.embed nrr))
                in
-               (domain, int_domain, (Uf.LX.mkv_eq rr not_nrr, ex) :: eqs, ss)
-             | _ -> (domain, int_domain, eqs, ss)
+               (domain, int_domain, delta, (Uf.LX.mkv_eq rr not_nrr, ex) :: eqs, ss)
+             | _ -> (domain, int_domain, delta, eqs, ss)
           )
-          (domain, int_domain, [], env.size_splits)
+          (domain, int_domain, delta, [], env.size_splits)
           la
       in
-      let eqs, domain, int_domain = propagate_all uf eqs domain int_domain in
+      let eqs, domain, int_domain, delta = propagate_all uf eqs domain int_domain delta in
       if Options.get_debug_bitv () && not (Compat.List.is_empty eqs) then (
         Printer.print_dbg
           ~module_name:"Bitv_rel" ~function_name:"assume"
@@ -2048,8 +2076,11 @@ let assume env uf la =
           ~module_name:"Bitv_rel" ~function_name:"assume"
           "interval domain: @[%a@]" Interval_domains.pp int_domain;
       );
-      (domain, int_domain, eqs, size_splits)
-    with Bitlist.Inconsistent ex | Interval_domain.Inconsistent ex ->
+      (domain, int_domain, eqs, delta, size_splits)
+    with
+    | Bitlist.Inconsistent ex
+    | Interval_domain.Inconsistent ex
+    | DX.Inconsistent ex ->
       raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
   in
   let assume =
@@ -2066,7 +2097,8 @@ let assume env uf la =
   { size_splits ; terms = env.terms },
   Uf.GlobalDomains.add (module BV2Nat) bvconv @@
   Uf.GlobalDomains.add (module Bitlist_domains) domain @@
-  Uf.GlobalDomains.add (module Interval_domains) int_domain ds,
+  Uf.GlobalDomains.add (module Interval_domains) int_domain @@
+  Uf.GlobalDomains.add (module DX) delta ds,
   result
 
 let query _ _ _ = None

@@ -40,6 +40,7 @@ pkgs.mkShell {
     ppx_blob
     odoc
     ppx_deriving
+    ocamlgraph
     landmarks
     landmarks-ppx
     qcheck

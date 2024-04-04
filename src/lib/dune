@@ -24,6 +24,7 @@
     dune-build-info
     alt_ergo_prelude
     fmt
+    ocamlgraph
   )
   (preprocess
     (pps
@@ -53,6 +54,7 @@
     Ite_rel Matching Matching_types Polynome Records Records_rel
     Satml_frontend_hybrid Satml_frontend Satml Sat_solver Sat_solver_sig
     Sig Sig_rel Theory Uf Use Domains Domains_intf Rel_utils Bitlist
+    Delta
     ; structures
     Commands Errors Explanation Fpa_rounding
     Parsed Profiling Satml_types Symbols
