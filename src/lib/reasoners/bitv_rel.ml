@@ -663,6 +663,89 @@ struct
     end)
 end
 
+module DX = struct
+  include Delta.X.Persistent
+
+  exception Inconsistent = Negative_cycle
+
+  type _ Uf.id += Id : t Uf.id
+
+  let filter_ty = is_bv_ty
+
+  let init _ t =
+    (* Variables are added dynamically when constraints apply. *)
+    t
+
+  let normal_form r =
+    let rec loop cte acc = function
+      | [] -> cte, List.rev acc
+      | { Bitv.bv = Bitv.Cte n; sz } :: xs ->
+        loop
+          Z.(cte lsl sz + n)
+          ({ Bitv.bv = Bitv.Cte Z.zero ; sz } :: acc)
+          xs
+      | { sz; _ } as x :: xs ->
+        loop Z.(cte lsl sz) (x :: acc) xs
+    in
+    let cte, bv = loop Z.zero [] (Shostak.Bitv.embed r) in
+    match bv with
+    | [] -> cte, None
+    | _ -> cte, Some (Shostak.Bitv.is_mine bv)
+
+  let add_lower_bound t r lb ex =
+    let zr, r = normal_form r in
+    match r with
+    | Some r ->
+      (* lb <= r + zr <-> lb - zr <= r *)
+      add_lower_bound t r (Z.sub lb zr) ex
+    | None ->
+      if Z.compare lb zr <= 0 then t else raise (Inconsistent ex)
+
+  let add_upper_bound t r ub ex =
+    let zr, r = normal_form r in
+    match r with
+    | Some r ->
+      (* r + zr <= ub <-> r <= ub - zr *)
+      add_upper_bound t r (Z.sub ub zr) ex
+    | None ->
+      if Z.compare zr ub <= 0 then t else raise (Inconsistent ex)
+
+  let add_delta_le delta x y k ex =
+    let zx, x = normal_form x in
+    let zy, y = normal_form y in
+    (* x + zx <= y + zy + k <-> x <= y + (zy + k - zx) *)
+    let k = Z.(zy + k - zx) in
+    match x, y with
+    | None, None ->
+      if Z.compare Z.zero k <= 0 then delta else raise (Inconsistent ex)
+    | Some x, None ->
+      add_upper_bound delta x k ex
+    | None, Some y ->
+      add_lower_bound delta y (Z.neg k) ex
+    | Some x, Some y ->
+      add_delta_le delta x y k ex
+
+
+  let subst ~ex rr nrr t =
+    assert (not (X.is_constant rr));
+    let zrr, rr = normal_form rr in
+
+    (* [rr] cannot be a constant. *)
+    let rr = Option.get rr in
+
+    let znrr, nrr = normal_form nrr in
+    (* rr + zrr = nrr + znrr <-> rr = nrr + (znrr - zrr) *)
+    let ofs = Z.sub znrr zrr in
+
+    match nrr with
+    | None ->
+      let t = add_lower_bound t rr ofs ex in
+      let t = add_upper_bound t rr ofs ex in
+      t
+    | Some nrr ->
+      subst t rr nrr ofs ex
+end
+
 module Constraint : sig
   type binop =
     (* Bitwise operations *)
@@ -1735,6 +1818,39 @@ let iter_parents a f t =
   | cs -> Rel_utils.XComparable.Set.iter f cs
   | exception Not_found -> ()
 
+let constrain_delta_from_interval delta r int =
+  let lb, ex_lb = Intervals.Int.lower_bound int in
+  let lb = finite_lower_bound lb in
+  let delta = DX.add_lower_bound delta r lb ex_lb in
+
+  let ub, ex_ub = Intervals.Int.upper_bound int in
+  let sz = match X.type_info r with Tbitv n -> n | _ -> assert false in
+  let ub = finite_upper_bound ~size:sz ub in
+  let delta = DX.add_upper_bound delta r ub ex_ub in
+
+  delta
+
+let constrain_interval_from_delta int delta r =
+  let open Interval_domains.Ephemeral in
+  begin match DX.lower_bound_exn delta r with
+    | lb, ex ->
+      let di = Intervals.Int.of_bounds (Closed lb) Unbounded in
+      let old = !!int in
+      update ~ex int di;
+      if not (Intervals.Int.equal old !!int) then
+        Printer.print_dbg "FOR %a: FROM %a -> %a@."
+          X.print r Intervals.Int.pp old Intervals.Int.pp !!int;
+    | exception Not_found -> () end;
+  begin match DX.upper_bound_exn delta r with
+    | ub, ex ->
+      let di = Intervals.Int.of_bounds Unbounded (Closed ub) in
+      let old = !!int in
+      update ~ex int di;
+      if not (Intervals.Int.equal old !!int) then
+        Printer.print_dbg "FOR %a: FROM %a -> %a@."
+          X.print r Intervals.Int.pp old Intervals.Int.pp !!int;
+    | exception Not_found -> () end
+
 let propagate_bitlist queue vars dom =
   let structural_propagation r =
     let open Bitlist_domains.Ephemeral.Canon in
@@ -1870,6 +1986,14 @@ let simplify_all uf eqs touched (dom, idom) =
         ) c.value (dom, idom)
     ) to_add (dom, idom)
 
+let propagate_delta touched delta =
+  Printer.print_dbg "BEFORE: %a@." DX.pp delta;
+  let { DX.M.inf_improved ; sup_improved }, delta = DX.solve_exn delta in
+  Printer.print_dbg "AFTER: %a@." DX.pp delta;
+  DX.S.iter (fun r -> HX.replace touched r ()) inf_improved;
+  DX.S.iter (fun r -> HX.replace touched r ()) sup_improved;
+  delta
+
 let rec propagate_all uf eqs bdom idom delta =
   (* Optimization to avoid unnecessary allocations *)
   let do_bitlist = Bitlist_domains.needs_propagation bdom in
@@ -1890,6 +2014,7 @@ let rec propagate_all uf eqs bdom idom delta =
     in
     let bitlist_changed = HX.create 17 in
     let interval_changed = HX.create 17 in
+    let delta_changed = HX.create 17 in
     let bitlist_events =
       { Domains_intf.evt_atomic_change = touch bitlist_changed bitlist_queue
       ; evt_composite_change = touch bitlist_changed bitlist_queue
@@ -1926,12 +2051,16 @@ let rec propagate_all uf eqs bdom idom delta =
     (* Now the interval domain is stable, but the new intervals may have an
        impact on the bitlist domains, so we must shrink them again when
        applicable. We repeat until a fixpoint is reached. *)
+    let delta = ref delta in
     while HX.length interval_changed > 0 do
-      HX.iter (fun r () ->
+      delta := HX.fold (fun r () delta ->
+        let int = Interval_domains.Ephemeral.(Entry.domain (entry idom r)) in
           constrain_bitlist_from_interval ~size:(bitwidth r)
             Bitlist_domains.Ephemeral.(entry bdom r)
-            Interval_domains.Ephemeral.(!!(entry idom r))
-        ) interval_changed;
+            int;
+
+          constrain_delta_from_interval delta r int
+        ) interval_changed !delta;
       HX.clear interval_changed;
       propagate_bitlist bitlist_queue bvars uf_bdom;
       assert (QC.is_empty bitlist_queue);
@@ -1943,6 +2072,15 @@ let rec propagate_all uf eqs bdom idom delta =
             Bitlist_domains.Ephemeral.(!!(entry bdom r))
         ) bitlist_changed;
       HX.clear bitlist_changed;
+
+      delta := propagate_delta delta_changed !delta;
+      HX.iter (fun r () ->
+        constrain_interval_from_delta
+          Interval_domains.Ephemeral.(entry idom r)
+          !delta r
+      ) delta_changed;
+      HX.clear delta_changed;
+
       propagate_intervals interval_queue ivars uf_idom;
       assert (QC.is_empty interval_queue);
     done;
@@ -1960,26 +2098,9 @@ let rec propagate_all uf eqs bdom idom delta =
     let eqs, (bdom, idom) = simplify_all uf eqs seen_constraints (bdom, idom) in
 
     (* Propagate again in case constraints were simplified. *)
-    propagate_all uf eqs bdom idom delta
+    propagate_all uf eqs bdom idom !delta
   else
     eqs, bdom, idom, delta
-
-module DX = struct
-  include Delta.X.Persistent
-
-  exception Inconsistent = Negative_cycle
-
-  type _ Uf.id += Id : t Uf.id
-
-  let filter_ty = is_bv_ty
-
-  let init _ t =
-    (* Variables are added dynamically when constraints apply. *)
-    t
-
-  let subst ~ex rr nrr t =
-    add_delta_eq t rr nrr Z.zero ex
-end
 
 type t =
   { terms : SX.t
@@ -2017,6 +2138,28 @@ let add_bvugt ~ex delta x y =
   (* x > y <-> y <= x - 1 *)
   add_delta_le ~ex delta y x Z.minus_one
 
+let init_delta ~ex delta x int_domain =
+  let x_dom = Interval_domains.get x int_domain in
+  let minv, ex_min = Intervals.Int.lower_bound x_dom in
+  let maxv, ex_max = Intervals.Int.upper_bound x_dom in
+  let delta =
+    match minv with
+    | Intervals_intf.Unbounded -> delta
+    | Closed minv ->
+      DX.add_lower_bound delta x minv (Ex.union ex ex_min)
+    | Open minv ->
+      DX.add_lower_bound delta x (Z.succ minv) (Ex.union ex ex_min)
+  in
+  let delta =
+    match maxv with
+    | Intervals_intf.Unbounded -> delta
+    | Closed maxv ->
+      DX.add_upper_bound delta x maxv (Ex.union ex ex_max)
+    | Open maxv ->
+      DX.add_upper_bound delta x (Z.pred maxv) (Ex.union ex ex_max)
+  in
+  delta
+
 let assume env uf la =
   let ds = Uf.domains uf in
   let bvconv = Uf.GlobalDomains.find (module BV2Nat) ds in
@@ -2043,7 +2186,9 @@ let assume env uf la =
              match a, orig with
              | L.Builtin (is_true, BVULE, [x; y]), _ ->
                let x, exx = Uf.find_r uf x in
+               let delta = init_delta ~ex:exx delta x int_domain in
                let y, exy = Uf.find_r uf y in
+               let delta = init_delta ~ex:exy delta y int_domain in
                let ex = Ex.union ex @@ Ex.union exx exy in
                let delta =
                  if is_true then
