@@ -1926,7 +1926,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     with
     | Sat ->
       (*check_model ();*)
-      env.is_searching <- false;
       remove_satisfied env env.clauses;
       remove_satisfied env env.learnts;
       raise Sat
