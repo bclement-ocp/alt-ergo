@@ -181,6 +181,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       (* si vrai, les contraintes sont deja fausses *)
       mutable is_unsat : bool;
 
+      mutable is_searching : bool;
+      mutable delayed_cs : bool;
+
       mutable unsat_core : Atom.clause list option;
 
       (* clauses du probleme *)
@@ -448,6 +451,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       hcons_env;
 
       is_unsat = false;
+      is_searching = false;
+      delayed_cs = false;
 
       unsat_core = None;
 
@@ -1159,7 +1164,11 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         Printer.print_dbg "[satml] Theory_propagate of %d atoms@." !nb_f;
       Queue.clear env.tatoms_queue;
       Queue.clear env.th_tableaux;
-      if !facts == [] then C_none
+      if !facts == [] then
+        if env.delayed_cs then (
+          env.delayed_cs <- false;
+          do_case_split env Util.AfterTheoryAssume
+        ) else C_none
       else
         try
           (*let full_model = nb_assigns() = nb_vars () in*)
@@ -1170,7 +1179,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           in
           Steps.incr (Steps.Th_assumed cpt);
           env.tenv <- t;
-          do_case_split env Util.AfterTheoryAssume
+          if not env.is_searching then (env.delayed_cs <- true; C_none)
+          else do_case_split env Util.AfterTheoryAssume
         (*if full_model then expensive_theory_propagate ()
           else None*)
         with Ex.Inconsistent (dep, _terms) ->
@@ -1905,6 +1915,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     let n_of_learnts =
       ref ((Atom.to_float (nb_clauses env)) *. env.learntsize_factor) in
     try
+      env.is_searching <- true;
       while true do
         (try search env (ref Auto)
                (Atom.to_int !n_of_conflicts) (Atom.to_int !n_of_learnts);
@@ -1915,6 +1926,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     with
     | Sat ->
       (*check_model ();*)
+      env.is_searching <- false;
       remove_satisfied env env.clauses;
       remove_satisfied env env.learnts;
       raise Sat
