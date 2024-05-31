@@ -7,6 +7,9 @@ on:
     branches:
       - next
       - main
+  release:
+    types:
+      - created
 
 jobs:
   macos-static:
@@ -95,3 +98,11 @@ jobs:
         with:
           name: alt-ergo-x86_64-linux-musl
           path: _destdir/opt/alt-ergo/bin/alt-ergo
+
+      - uses: svenstaro/upload-release-action@v2
+        if: ${{ github.event_name == 'release' }}
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: _destdir/opt/alt-ergo/bin/alt-ergo
+          asset_name: alt-ergo-${{ github.event.release.name }}-x86_64-linux-musl
+          tag: ${{ github.event.release.tag_name }}
