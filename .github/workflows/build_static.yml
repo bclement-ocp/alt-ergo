@@ -57,6 +57,9 @@ jobs:
   musl:
     name: Build statically linked binary with musl
 
+    permissions:
+      contents: write
+
     runs-on: ubuntu-latest
 
     # Retrieve and use a light docker container on which ocaml 4.14 is installed
@@ -105,5 +108,5 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: _destdir/opt/alt-ergo/bin/alt-ergo
-          asset_name: alt-ergo-${{ github.event.release.name }}-x86_64-linux-musl
+          asset_name: alt-ergo-${{ github.event.release.tag_name }}-x86_64-linux-musl
           tag: ${{ github.event.release.tag_name }}
