@@ -1,7 +1,9 @@
-name: Release
+name: release
 
 on:
-  workflow_dispatch
+  release:
+    types:
+      - created
 
 env:
   OCAML_DEFAULT_VERSION: 4.14.1

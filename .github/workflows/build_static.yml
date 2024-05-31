@@ -72,6 +72,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-tags: true
 
       - name: Switch to ocaml user
         run: su ocaml
