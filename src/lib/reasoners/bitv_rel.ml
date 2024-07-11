@@ -672,25 +672,19 @@ module DX = struct
 
   let filter_ty = is_bv_ty
 
-  let init _ t =
-    (* Variables are added dynamically when constraints apply. *)
-    t
+  let init r t =
+    match BitvNormalForm.normal_form r with
+    | Constant _ -> t
+    | Atom (r, _) | Composite (r, _) ->
+      let t = add_lower_bound t r Z.zero Ex.empty in
+      let t = add_upper_bound t r Z.(one lsl (bitwidth r)) Ex.empty in
+      t
 
   let normal_form r =
-    let rec loop cte acc = function
-      | [] -> cte, List.rev acc
-      | { Bitv.bv = Bitv.Cte n; sz } :: xs ->
-        loop
-          Z.(cte lsl sz + n)
-          ({ Bitv.bv = Bitv.Cte Z.zero ; sz } :: acc)
-          xs
-      | { sz; _ } as x :: xs ->
-        loop Z.(cte lsl sz) (x :: acc) xs
-    in
-    let cte, bv = loop Z.zero [] (Shostak.Bitv.embed r) in
-    match bv with
-    | [] -> cte, None
-    | _ -> cte, Some (Shostak.Bitv.is_mine bv)
+    match BitvNormalForm.normal_form r with
+    | Constant cte -> cte, None
+    | Atom (r, cte) -> cte, Some r
+    | Composite (c, cte) -> cte, Some c
 
   let add_lower_bound t r lb ex =
     let zr, r = normal_form r in
@@ -1998,7 +1992,8 @@ let rec propagate_all uf eqs bdom idom delta =
   (* Optimization to avoid unnecessary allocations *)
   let do_bitlist = Bitlist_domains.needs_propagation bdom in
   let do_intervals = Interval_domains.needs_propagation idom in
-  let do_any = do_bitlist || do_intervals in
+  let do_delta = DX.needs_propagation delta in
+  let do_any = do_bitlist || do_intervals || do_delta in
   if do_any then
     let shostak_candidates = HX.create 17 in
     let seen_constraints = HC.create 17 in
@@ -2033,35 +2028,9 @@ let rec propagate_all uf eqs bdom idom delta =
     let uf_bdom = Bitlist_domains.Ephemeral.canon uf bdom in
     let uf_idom = Interval_domains.Ephemeral.canon uf idom in
 
-    (* First, we propagate the pending constraints to both domains. Changes in
-       the bitlist domain are used to shrink the interval domains. *)
-    propagate_bitlist bitlist_queue bvars uf_bdom;
-    assert (QC.is_empty bitlist_queue);
-
-    HX.iter (fun r () ->
-        HX.replace shostak_candidates r ();
-        constrain_interval_from_bitlist ~size:(bitwidth r)
-          Interval_domains.Ephemeral.(entry idom r)
-          Bitlist_domains.Ephemeral.(!!(entry bdom r))
-      ) bitlist_changed;
-    HX.clear bitlist_changed;
-    propagate_intervals interval_queue ivars uf_idom;
-    assert (QC.is_empty interval_queue);
-
-    (* Now the interval domain is stable, but the new intervals may have an
-       impact on the bitlist domains, so we must shrink them again when
-       applicable. We repeat until a fixpoint is reached. *)
     let delta = ref delta in
-    while HX.length interval_changed > 0 do
-      delta := HX.fold (fun r () delta ->
-        let int = Interval_domains.Ephemeral.(Entry.domain (entry idom r)) in
-          constrain_bitlist_from_interval ~size:(bitwidth r)
-            Bitlist_domains.Ephemeral.(entry bdom r)
-            int;
 
-          constrain_delta_from_interval delta r int
-        ) interval_changed !delta;
-      HX.clear interval_changed;
+    let do_propagate_bitlist () =
       propagate_bitlist bitlist_queue bvars uf_bdom;
       assert (QC.is_empty bitlist_queue);
 
@@ -2072,17 +2041,48 @@ let rec propagate_all uf eqs bdom idom delta =
             Bitlist_domains.Ephemeral.(!!(entry bdom r))
         ) bitlist_changed;
       HX.clear bitlist_changed;
+    in
 
-      delta := propagate_delta delta_changed !delta;
-      HX.iter (fun r () ->
-        constrain_interval_from_delta
-          Interval_domains.Ephemeral.(entry idom r)
-          !delta r
-      ) delta_changed;
-      HX.clear delta_changed;
-
+    let do_propagate_intervals () =
       propagate_intervals interval_queue ivars uf_idom;
       assert (QC.is_empty interval_queue);
+
+      delta := HX.fold (fun r () delta ->
+          constrain_bitlist_from_interval ~size:(bitwidth r)
+            Bitlist_domains.Ephemeral.(entry bdom r)
+            (Interval_domains.Ephemeral.(Entry.domain (entry idom r)));
+
+          constrain_delta_from_interval delta r
+            (Interval_domains.Ephemeral.(Entry.domain (entry idom r)))
+        ) interval_changed !delta;
+      HX.clear interval_changed;
+    in
+
+    let do_propagate_delta () =
+      delta := propagate_delta delta_changed !delta;
+
+      HX.iter (fun r () ->
+          constrain_interval_from_delta
+            Interval_domains.Ephemeral.(entry idom r)
+            !delta r
+        ) delta_changed;
+      HX.clear delta_changed
+    in
+
+    let needs_propagation () =
+      DX.needs_propagation !delta ||
+      not (QC.is_empty interval_queue) ||
+      not (QC.is_empty bitlist_queue)
+    in
+
+    do_propagate_bitlist ();
+    do_propagate_intervals ();
+    do_propagate_delta ();
+
+    while needs_propagation () do
+      do_propagate_bitlist ();
+      do_propagate_intervals ();
+      do_propagate_delta ();
     done;
 
     let eqs =
@@ -2206,13 +2206,16 @@ let assume env uf la =
                let not_nrr =
                  Shostak.Bitv.is_mine (Bitv.lognot (Shostak.Bitv.embed nrr))
                in
-               (domain, int_domain, delta, (Uf.LX.mkv_eq rr not_nrr, ex) :: eqs, ss)
+               let eqs = (Uf.LX.mkv_eq rr not_nrr, ex) :: eqs in
+               (domain, int_domain, delta, eqs, ss)
              | _ -> (domain, int_domain, delta, eqs, ss)
           )
           (domain, int_domain, delta, [], env.size_splits)
           la
       in
-      let eqs, domain, int_domain, delta = propagate_all uf eqs domain int_domain delta in
+      let eqs, domain, int_domain, delta =
+        propagate_all uf eqs domain int_domain delta
+      in
       if Options.get_debug_bitv () && not (Compat.List.is_empty eqs) then (
         Printer.print_dbg
           ~module_name:"Bitv_rel" ~function_name:"assume"
