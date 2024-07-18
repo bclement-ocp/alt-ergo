@@ -1,7 +1,7 @@
 (**************************************************************************)
 (*                                                                        *)
 (*     Alt-Ergo: The SMT Solver For Software Verification                 *)
-(*     Copyright (C) 2024 --- OCamlPro SAS                           *)
+(*     Copyright (C) 2024 --- OCamlPro SAS                                *)
 (*                                                                        *)
 (*     This file is distributed under the terms of OCamlPro               *)
 (*     Non-Commercial Purpose License, version 1.                         *)
@@ -11,6 +11,23 @@
 (*     More details can be found in the directory licenses/               *)
 (*                                                                        *)
 (**************************************************************************)
+
+(**
+   This module implements a global solver for difference constraints, i.e.
+   constraints of the form {m x - y \leq d} where {m x} and {m y} are variables
+   and {m d} is an integer constraint.
+
+   The implementation of draws heavily from the description of Feydy, Schutt and
+   Stuckey [1], in particular regarding the separate handling of bounds
+   constraints. This documentation, however, intends to be self-documenting and
+   no reference to the paper should be needed.
+
+   [1]: Global difference constraint propagation for finite domain solvers.
+    Feydy, T., Schutt, A. & Stuckey, P. (2008).
+    PPDP'08 - Proceedings of the 10th International ACM SIGPLAN Symposium on
+    Principles and Practice of Declarative Programming, pp. 226-235.
+    doi:10.1145/1389449.1389478
+*)
 
 type level =
   | App
@@ -44,19 +61,23 @@ module Log = struct
   let info k = msg Info k
 end
 
-(** Module signature for the type of weights, or constant differences.
+(** {2 Interfaces} *)
 
-    A difference constraint [x - y <= k] is represented as an edge from [x] to
-    [y] with weight [k] in the difference graph. *)
-module type WEIGHT = sig
+(** Module signature for constant value types, used as the right-hand side of a
+    difference constraint {m x - y <= d}. *)
+module type VALUE = sig
   type t
-  (** The type of weights. *)
+  (** The type of values. *)
 
   val pp_print : t Fmt.t
-  (** Pretty-printer for weights. *)
+  (** Pretty-printer for values.
+
+      {b Note}: We use the name [pp_print] here rather than [pp] because we
+      expect the [Z] moduel from Zarith to be used as values in most
+      situations. *)
 
   val compare : t -> t -> int
-  (** Comparison function for weights. *)
+  (** Comparison function for values. *)
 
   val add : t -> t -> t
   (** Addition. Must be associative and commutative. *)
@@ -66,15 +87,6 @@ module type WEIGHT = sig
 
   val sub : t -> t -> t
   (** Subtraction. Must have [sub x y = z] iff [add z y = x]. *)
-end
-
-(** Helper module defining notations for weight arithmetic. *)
-module WeightNotations (W : WEIGHT) = struct
-  let ( + ) = W.add
-
-  let ( - ) = W.sub
-
-  let (~-) = W.sub W.zero
 end
 
 (** Module signature for oriented and ordered justifications. *)
@@ -105,61 +117,347 @@ module type PATH = sig
       otherwise the behavior of this function is unspecified. *)
 end
 
-module Core
-    (W : WEIGHT)
-    (P : PATH)
-    (B : Graph.Builder.S with type G.E.label = W.t * P.t)
-    (HM : Graph.Blocks.HM with type key = B.G.V.t)
-    (PP : sig val vertex : B.G.V.t Fmt.t val edge : B.G.E.t Fmt.t end) : sig
-  type g =
-    { graph : B.G.t
-    ; potentials : W.t HM.t }
+(** Module signature for variables, used in the left-hand side of difference
+    constraints. *)
+module type VARIABLE = sig
+  type t
+  (** The type of variables. *)
 
-  val create : B.G.t -> W.t HM.t -> g
+  val pp : t Fmt.t
+  (** Pretty-printer for variables. *)
 
-  type graph_ops =
-    { potential : g -> B.G.V.t -> W.t
-    ; iter_succ_e : (B.G.E.t -> unit) -> B.G.t -> B.G.V.t -> unit
-    ; src : B.G.E.t -> B.G.V.t
-    ; dst : B.G.E.t -> B.G.V.t
-    ; append : P.t -> P.t -> P.t }
+  val equal : t -> t -> bool
+  (** Equality on variables. *)
 
-  val forward_ops : graph_ops
+  val compare : t -> t -> int
+  (** Comparison of variables. *)
 
-  val backward_ops : graph_ops
+  val hash : t -> int
+  (** Hash function on variables. *)
 
-  val remove_vertex : g -> B.G.V.t -> g
+  val default : t
+  (** Default variable, used as a placeholder. Can be any value of the proper
+      type.*)
 
-  val reduced_cost : g -> B.G.E.t -> W.t
+  type value
+  (** The type of values that the variables can take. This is used for the
+      [lower_bound_exn] and [upper_bound_exn] functions below. *)
 
-  val add_edge_e : g -> B.G.E.t -> g
+  val lower_bound_exn : t -> value
+  (** Returns the intrinsic lower bound of this variable, if any.
 
-  val subst : g -> B.G.V.t -> B.G.V.t -> W.t -> P.t -> g
+      {b Note}: The returned lower bound must be valid in all contexts.
 
-  module Vtbl : Hashtbl.S with type key = B.G.V.t
+      @raises Not_found if the variable is unbounded below. *)
 
-  module Elt : sig
-    type t = { target : B.G.V.t ; weight : W.t ; path : P.t }
+  val upper_bound_exn : t -> value
+  (** Returns the intrinsic upper bound of with this variable, if any.
 
-    val compare : t -> t -> int
+      {b Note}: The returned upper bound must be valid in all contexts.
 
-    val default : t
-  end
+      @raises Not_found if the variable is unbounded above. *)
+end
 
-  module H : module type of Heap.MakeOrdered(Elt)
+(** {2 Implementation} *)
 
-  val weight : B.G.E.t -> W.t
+module Make(W : VALUE)(V : VARIABLE with type value = W.t)(P : PATH) : sig
+  type t
+  (** The type of global difference constraints. *)
 
-  val path : B.G.E.t -> P.t
+  val pp : t Fmt.t
+  (** Pretty-printer for global difference constraints. *)
+
+  val empty : t
+  (** The empty global constraint. *)
 
   exception Negative_cycle of P.t
+  (** Exception raised by the various [*_exn] functions below when an
+      inconsistency is detected.
+
+      Internally, difference constraints are represented as edges in a weighted
+      graph. An inconsistency corresponds to a negative cycle, i.e. a path
+      proving [x - x < 0] for some variable [x]. *)
+
+  (** {2 Accessing information} *)
+
+  val mem : t -> V.t -> bool
+  (** [mem t x] returns [true] iff there is a constraint associated with [x] in
+      [t]. *)
+
+  val lower_bound_exn : t -> V.t -> W.t * P.t
+  (** [lower_bound_exn t v] returns the lower bound associated with variable [v]
+      and its justification.
+
+      @raises Not_found if [v] is unbounded below. *)
+
+  val upper_bound_exn : t -> V.t -> W.t * P.t
+  (** [upper_bound_exn t v] returns the upper bound associated with variable [v]
+      and its justification.
+
+      @raises Not_found if [v] is unbounded above. *)
+
+  (** {2 Constraints} *)
+
+  val add_lower_bound_exn : t -> V.t -> W.t -> P.t -> t
+  (** [add_lower_bound_exn t x k p] registers a lower bound [k <= x] justified
+      by [p], which must be a path from [0] to [x].
+
+      {b Note}: The resulting problem is not guaranteed to be satisfiable, even
+      if no exception is raised. See {!is_sat} and {!solve_exn}.
+
+      @raises Negative_cycle if the upper bound for [x] is less than [k]. *)
+
+  val add_upper_bound_exn : t -> V.t -> W.t -> P.t -> t
+  (** [add_lower_bound_exn t x k p] registers an upper bound [x <= k] justified
+      by [p], which must be a path from [x] to [0].
+
+      {b Note}: The resulting problem is not guaranteed to be satisfiable, even
+      if no exception is raised. See {!is_sat} and {!solve_exn}.
+
+      @raises Negative_cycle if the lower bound for [x] is greater than [k]. *)
+
+  val add_constraint_exn : t -> V.t -> V.t -> W.t -> P.t -> t
+  (** [add_constraint_exn t x y k p] registers the difference constraint
+      [x - y <= k] with justification [p], which must be a path from [x] to [y].
+
+      {b Note}: The resulting problem is not guaranteed to be satisfiable, even
+      if no exception is raised. See {!is_sat} and {!solve_exn}.
+
+      @raises Negative_cycle if a negative cycle is found while processing the
+      constraint. *)
+
+  (** {2 Substitution} *)
+
+  val assign_exn : t -> V.t -> W.t -> P.t -> t
+  (** [assign_exn t x k p] performs the destructive assignment [x := k] with
+      justification [p] (i.e. [p] justifies that [x = k] holds).
+
+      The variable [x] no longer appears in the resulting problem.
+
+      {b Note}: The resulting problem is not guaranteed to be satisfiable, even
+      if no exception is raised. See {!is_sat} and {!solve_exn}.
+
+      @raises Negative_cycle if an inconsistency is detected while performing
+        the assignment. *)
+
+  val subst_exn : t -> V.t -> V.t -> W.t -> P.t -> t
+  (** [subst_exn t x y k p] performs the substitution [x := y + k] with
+      justification [p] (i.e. [p] justifies that [x - y = k] holds).
+
+      The variable [x] no longer appears in the resulting problem.
+
+      {b Note}: The resulting problem is not guaranteed to be satisfiable, even
+      if no exception is raised. See {!is_sat} and {!solve_exn}.
+
+      @raises Negative_cycle if an inconsistency is detected while performing
+        the assignment. *)
+
+  (** {2 Solving} *)
+
+  val is_sat : t -> bool
+  (** Returns [true] if propagation is needed to ensure consistency.
+
+      If [false], the current environment is already solved and calling [solve]
+      will do nothing. *)
+
+  val solve_exn : ?notify:(V.t -> unit) -> t -> t
+  (** Solve the current problem and returns a solution if it exists.
+
+      If provided, the [notify] function is used to notify the caller when the
+      bounds for a variable has changed since the last call to [solve_exn]. Note
+      that the changed bounds are not included in the notification; if needed,
+      they should be read from the returned solution (if satisfiable).
+
+      {b Note}: Notifications will be emitted for bound changes resulting from
+      calls to [add_lower_bound] and [add_upper_bound] since the last call to
+      [solve], even if this call to [solve] does not refine those bounds
+      further.
+
+      If it does not raise, [solve_exn] is guaranteed to return a satisfiable
+      environment, and is guaranteed to return the given environment unmodified
+      if [is_sat] returns [true].
+
+      @raises Negative_cycle if the environment is unsatisfiable. *)
 end =
 struct
-  open WeightNotations(W)
+  module G = Graph.Persistent.Digraph.ConcreteBidirectionalLabeled(V)(struct
+      type t = W.t * P.t
 
-  module G = B.G
+      let compare (x, _) (y, _) = W.compare x y
+
+      let default = W.zero, P.empty
+    end)
+  module B = Graph.Builder.P(G)
+
+  module MV = Map.Make(V)
+  module SV = Set.Make(V)
+
+  (* Handy notations *)
+  let ( + ) = W.add
+  let ( - ) = W.sub
+  let (~-) = W.sub W.zero
+
+  type t =
+    { graph : G.t
+    (** The graph of difference constraints between variables.
+
+        An edge from [u] to [v] is labelled with a pair [(w, p)] where [w] is
+        a weight and [p] is a path, and represents the constraint:
+          [p => u - v <= w]
+        that is understood to be true in the current context.
+
+        In addition to the vertices explicitly represented in the graph, we
+        assume the existence of a virtual vertex, denoted [0], to represent
+        constant values; see the [inf] and [inf_changed] fields. *)
+
+    ; potential : W.t MV.t
+    (** Map from vertices in the graph to their current potential. Missing
+        entries are treated as zero.
+
+        We do not keep track of a potential for the virtual node [0]; when
+        needed, an appropriate potential is computed from the information in
+        [inf] and [sup].
+
+        We maintain the invariant that for any edge [u -{w}-> v] in [g], the
+        reduced cost [potential(u) + w - potential(v)] is nonnegative.
+
+        Note that for a cycle, the reduced cost is identical to the weight in
+        the original graph since the potentials cancel each other. *)
+
+    ; inf : (W.t * P.t) MV.t
+    (** Map from vertices in the graph to their current known infimum and a
+        justification for it. Missing entries are unbounded below.
+
+        An entry [v -> (w, p)] in the map represents the constraint:
+          [p => w <= v]
+        or:
+          [p => 0 - v <= -w]
+
+        This can be understood as a virtual edge [0 -{-w, p}-> v] from the
+        virtual vertex [0] to [v]. *)
+
+    ; inf_changed : SV.t
+    (** Set of vertices whose infimum has changed (improved).
+
+        Let us say that a vertex is {e changed} if it is in [inf_changed], and
+        that is it {e unchanged} otherwise. Let us further say that a path is
+        {e changed} if it goes through at least one changed vertex (other than
+        the start and the end of the path), and that it is {e unchanged}
+        otherwise.
+
+        We maintain the invariant that the shortest {b unchanged} path from
+        [0] to an {b unchanged} vertex [t] is the virtual edge from [0] to [t]
+        with cost [-inf t].
+
+        In particular, if [inf_changed] is empty, the shortest path from [0]
+        to [t] has cost [-inf t]. *)
+
+    ; sup : (W.t * P.t) MV.t
+    (** Map from vertices in the graph to their current known supremum and a
+        justification for it. Missing entries are unbounded above.
+
+        This is equivalent to [inf] in the mirror graph; see the documentation
+        for [inf]. *)
+
+    ; sup_changed : SV.t
+    (** Set of vertices whose supremum has changed (improved).
+
+        This is equivalent to [inf_changed] in the mirror graph; see the
+        documentation for [inf_changed]. *)
+
+    }
+
+  let empty =
+    { graph = G.empty
+    ; potential = MV.empty
+    ; inf = MV.empty
+    ; inf_changed = SV.empty
+    ; sup = MV.empty
+    ; sup_changed = SV.empty
+    }
+
+  let weight e = fst @@ G.E.label e
+
+  let path e = snd @@ G.E.label e
+
+  let potential pi v =
+    try MV.find v pi with Not_found -> W.zero
+
+  let pp_vertex pi ppf v =
+    Fmt.pf ppf "%a [pi = %a]" V.pp v W.pp_print (potential pi v)
+
+  let pp_edge pi ppf e =
+    Fmt.pf ppf "@[%a - %a <= %a@ %a@]"
+      (pp_vertex pi) (G.E.src e)
+      (pp_vertex pi) (G.E.dst e)
+      W.pp_print (weight e)
+      P.pp (path e)
+
+  let pp_lower_bound changed ppf (v, (lb, _ex)) =
+    let star = if SV.mem v changed then "*" else "" in
+    Fmt.pf ppf "%a <=%s %a" W.pp_print lb star V.pp v
+
+  let pp_upper_bound changed ppf (v, (lb, _ex)) =
+    let star = if SV.mem v changed then "*" else "" in
+    Fmt.pf ppf "%a <=%s %a" V.pp v star W.pp_print lb
+
+  let pp ppf { graph ; potential ; inf ; inf_changed ; sup ; sup_changed } =
+    let needs_cut = ref false in
+    let cut_if_needed () =
+      if !needs_cut then Fmt.cut ppf ();
+      needs_cut := true
+    in
+
+    if not (G.is_empty graph) then (
+      cut_if_needed ();
+      Fmt.iter ~sep:Fmt.cut G.iter_edges_e (pp_edge potential) ppf graph
+    );
+
+    if not (MV.is_empty inf) then (
+      cut_if_needed ();
+      Fmt.iter_bindings ~sep:Fmt.cut MV.iter
+        Fmt.(box (pp_lower_bound inf_changed)) ppf inf;
+    );
+
+    if not (MV.is_empty sup) then (
+      cut_if_needed ();
+      Fmt.iter_bindings ~sep:Fmt.cut MV.iter
+        Fmt.(box (pp_upper_bound sup_changed)) ppf sup
+    )
+
+  let set_potential pi v w =
+    if W.compare w W.zero = 0 then MV.remove v pi
+    else MV.add v w pi
+
+  let reduced_cost pi e =
+    potential pi (G.E.src e) + weight e - potential pi (G.E.dst e)
 
   exception Negative_cycle of P.t
+
+  let negative_cycle p = raise_notrace (Negative_cycle p)
+
+  let mem t x =
+    G.mem_vertex t.graph x || MV.mem x t.inf || MV.mem x t.sup
+
+  let set_lower_bound_exn ~sup inf x k p =
+    match MV.find x sup with
+    | sup, sup_p when W.compare k sup > 0 ->
+      (* p is a path from 0 to v proving w <= v
+          sup_p is a path from v to 0 proving v <= sup
+          the concatenation is a negative cycle starting in [0] *)
+      negative_cycle (P.append p sup_p)
+    | _ | exception Not_found ->
+      MV.add x (k, p) inf
+
+  let set_upper_bound_exn ~inf sup v w p =
+    match MV.find v inf with
+    | inf, inf_p when W.compare w inf < 0 ->
+      (* p is a path from v to 0 proving v <= w
+          inf_p is a path from 0 to v proving inf <= v
+          the concatenation is a negative cycle starting in [0] *)
+      negative_cycle (P.append inf_p p)
+    | _ | exception Not_found ->
+      MV.add v (w, p) sup
 
   module Elt = struct
     type t = { target : G.V.t ; weight : W.t ; path : P.t }
@@ -167,130 +465,116 @@ struct
     let compare x y = W.compare x.weight y.weight
 
     let default =
-      { target = Obj.magic 0 (* gruik *); weight = W.zero ; path = P.empty }
+      { target = V.default ; weight = W.zero ; path = P.empty }
   end
 
   module H = Heap.MakeOrdered(Elt)
 
   module Vtbl = Hashtbl.Make(G.V)
 
-  let weight e = fst @@ G.E.label e
+  (* Precondition: All edges in [g] have a nonnegative reduced cost.
+     Precondition: [e] has a negative reduced cost.
 
-  let path e = snd @@ G.E.label e
+     Postcondition: All edges in [g] and [e] have a nonnegative reduced cost.
 
-  module Potential : sig
-    type t = W.t HM.t
+     We perform an incremental variant of Dijkstra's algorithm computing all the
+     *negative* shortest paths in the reduced graph of [g + e] starting from
+     vertex [x = src e].
 
-    val get : G.V.t -> t -> W.t
+     (Note that since all edges in [g] have a nonnegative reduced cost, any
+     negative cycle in [g + e] necessarily goes through [x].)
 
-    val remove : G.V.t -> t -> t
+     If we find a negative cycle in the reduced graph, this leads to a negative
+     cycle in [g + e], i.e. a proof that [x - x < 0].
 
-    val reduced_cost : G.E.t -> t -> W.t
+     Otherwise, we shift the potential for any node [s] depending on the value
+     of [wSP(x, s)] (the weight of the shortest path from [x] to [s]) to yield
+     a nonnegative reduced cost in [g + e] (see below). *)
+  let restore_potential_exn g pi e =
+    let x = G.E.src e and y = G.E.dst e in
+    let dy = reduced_cost pi e in
+    assert (W.compare dy W.zero < 0);
 
-    val restore_broken_edge : G.t -> G.E.t -> t -> t
-  end = struct
-    type t = W.t HM.t
+    (* Vertices for which the negative shortest path has been found. *)
+    let visited = Vtbl.create 97 in
 
-    let get v p =
-      try HM.find v p with Not_found -> W.zero
+    (* [distance t] is the length of the shortest {b negative} path from [x]
+       to [t] that starts with [edge] and only goes through [visited]
+       vertices.
 
-    let set v w p =
-      if W.compare w W.zero = 0 then HM.remove v p
-      else HM.add v w p
+       If [t] is in [visited], this is the actual negative shortest path from
+       [x] to [t]. *)
+    let distance = Vtbl.create 97 in
 
-    let reduced_cost e p =
-      get (G.E.src e) p + weight e - get (G.E.dst e) p
+    (* Min-queue of candidate nodes. *)
+    let pq = H.create 97 in
 
-    let remove = HM.remove
+    let rec loop () =
+      match H.pop_min pq with
+      | exception Not_found ->
+        (* We have found all negative shortest paths from [x]. *)
+        None
+      | elt ->
+        let s = elt.target in
+        if Vtbl.mem visited s then loop () else (
+          (* w is [wSP(x, s) < 0] *)
+          let w = elt.weight in
+          assert (W.compare w W.zero < 0);
+          if G.V.equal s x then
+            (* There is a path from [x] to itself with negative weight: the
+               path proves [x - x < 0].
 
-    (* Precondition: All edges other than [e] have a nonnegative reduced cost.
-       Precondition: [e] has a negative reduced cost.
+               Note that since [e] is the only negative edge in the reduced
+               graph, any negative cycle starting in [x] necessarily comes
+               back to [x]. *)
+            Some elt.path
+          else (
+            Vtbl.replace visited s ();
 
-       Postcondition: All edges have a nonnegative reduced cost. *)
-    let restore_broken_edge g e p =
-      let x = G.E.src e and y = G.E.dst e in
+            (* Fix the negative slack for s then propagate forward *)
+            let new_potential_s = potential pi s + w in
+            G.iter_succ_e (fun edge ->
+                let t = G.E.dst edge in
+                if not (Vtbl.mem visited t) then (
+                  (* The shortest path in the reduced graph from [x] to [s]
+                     has (negative) length [w].
 
-      (* Vertices for which the negative shortest path has been found. *)
-      let visited = Vtbl.create 97 in
-
-      (* [distance t] is the length of the shortest {b negative} path from [x]
-         to [t] that starts with [edge] and only goes through [visited]
-         vertices.
-
-         If [t] is in [visited], this is the actual negative shortest path from
-         [x] to [t]. *)
-      let distance = Vtbl.create 97 in
-
-      (* Min-queue of candidate nodes. *)
-      let pq = H.create 97 in
-
-      let rec loop () =
-        match H.pop_min pq with
-        | exception Not_found ->
-          (* We have found all negative shortest paths from [x]. *)
-          ()
-        | elt ->
-          let s = elt.target in
-          if Vtbl.mem visited s then loop () else (
-            (* w is [wSP(x, s) < 0] *)
-            let w = elt.weight in
-            assert (W.compare w W.zero < 0);
-            if G.V.equal s x then
-              (* There is a path from [x] to itself with negative weight: the
-                 path proves [x - x < 0].
-
-                 Note that since [e] is the only negative edge in the reduced
-                 graph, any negative cycle starting in [x] necessarily comes
-                 back to [x]. *)
-              raise (Negative_cycle elt.path)
-            else (
-              Vtbl.replace visited s ();
-
-              (* Fix the negative slack for s then propagate forward *)
-              let new_potential_s = get s p + w in
-              G.iter_succ_e (fun edge ->
-                  let t = G.E.dst edge in
-                  if not (Vtbl.mem visited t) then (
-                    (* The shortest path in the reduced graph from [x] to [s]
-                       has (negative) length [w].
-
-                       For any edge [e] from [s] to [t] with weight [k], it
-                       induces a path in the reduced graph from [x] to [t] with
-                       length [dt = w + potential s + k - potential t]. *)
-                    let dt = new_potential_s + weight edge - get t p in
-                    let improved =
-                      (* Note: only keep negative paths. *)
-                      try W.compare dt (Vtbl.find distance t) < 0
-                      with Not_found -> W.compare dt W.zero < 0
-                    in
-                    if improved then (
-                      (* Best negative path from [x] to [t] so far. *)
-                      Vtbl.replace distance t dt;
-                      H.insert pq
-                        { weight = dt
-                        ; target = t
-                        ; path = P.append elt.path (path edge) }
-                    )
+                     For any edge [e] from [s] to [t] with weight [k], it
+                     induces a path in the reduced graph from [x] to [t] with
+                     length [dt = w + potential s + k - potential t]. *)
+                  let dt = new_potential_s + weight edge - potential pi t in
+                  let improved =
+                    (* Note: only keep negative paths. *)
+                    try W.compare dt (Vtbl.find distance t) < 0
+                    with Not_found -> W.compare dt W.zero < 0
+                  in
+                  if improved then (
+                    (* Best negative path from [x] to [t] so far. *)
+                    Vtbl.replace distance t dt;
+                    H.insert pq
+                      { weight = dt
+                      ; target = t
+                      ; path = P.append elt.path (path edge) }
                   )
-                ) g s;
+                )
+              ) g s;
 
-              loop ()
-            )
+            loop ()
           )
-      in
+        )
+    in
 
-      (* Base case: the shortest negative path (barring cycles) from [x] to [y]
-         is just the edge [e]. *)
-      let dy = reduced_cost e p in
-      assert (W.compare dy W.zero < 0);
-      Vtbl.replace distance y dy;
-      H.insert pq
-        { weight = dy
-        ; target = y
-        ; path = path e };
+    (* Base case: the shortest negative path (barring cycles) from [x] to [y]
+       is just the edge [e]. *)
+    Vtbl.replace distance y dy;
+    H.insert pq
+      { weight = dy
+      ; target = y
+      ; path = path e };
 
-      loop ();
-
+    match loop () with
+    | Some path -> negative_cycle path
+    | None ->
       (* Compute a new potential for [s] as [potential s + min(wSP(x, s), 0)]
          where [wSP(x, s)] is the length of the shortest path from [x] to [s].
 
@@ -316,157 +600,231 @@ struct
 
           which yields [new_potential s + k - new_potential t >= 0] since
           [new_potential t <= potential t + wSP(x, t)]. *)
-      Vtbl.fold (fun v slack new_potential ->
+      Vtbl.fold (fun v slack pi' ->
           assert (W.compare slack W.zero < 0);
-          set v (get v p + slack) new_potential
-        ) distance p
-  end
+          set_potential pi' v (potential pi v + slack)
+        ) distance pi
 
-  type g =
-    { graph : G.t
-    ; potentials : Potential.t }
+  let find_lower_bound_exn inf x =
+    try MV.find x inf with Not_found -> V.lower_bound_exn x, P.empty
 
-  let create graph potentials = { graph ; potentials }
+  let lower_bound_exn t x = find_lower_bound_exn t.inf x
 
-  let remove_vertex g v =
-    { graph = B.remove_vertex g.graph v
-    ; potentials = Potential.remove v g.potentials }
+  let add_lower_bound_exn ({ inf ; sup ; inf_changed ; _ } as t) x k p_0_x =
+    match find_lower_bound_exn inf x with
+    | inf, _ when W.compare inf k >= 0 -> t
+    | _ | exception Not_found ->
+      Log.debug (fun m ->
+          m "Improving lower bound to: %a <= %a@ "
+            W.pp_print k V.pp x);
+      let inf = set_lower_bound_exn ~sup inf x k p_0_x in
+      let inf_changed = SV.add x inf_changed in
+      { t with inf ; inf_changed }
 
-  let potential g v = Potential.get v g.potentials
+  let find_upper_bound_exn sup x =
+    try MV.find x sup with Not_found -> V.upper_bound_exn x, P.empty
 
-  let pp_vertex pi ppf v =
-    Fmt.pf ppf "%a [=%a]" PP.vertex v W.pp_print (Potential.get v pi)
+  let upper_bound_exn t x = find_upper_bound_exn t.sup x
 
-  let pp_edge pi ppf e =
-    Fmt.pf ppf "INEQUATIONS:@,";
-    Fmt.pf ppf "%a - %a <= %a"
-      (pp_vertex pi) (G.E.src e)
-      (pp_vertex pi) (G.E.dst e)
-      W.pp_print (fst @@ G.E.label e)
+  let add_upper_bound_exn ({ inf ; sup ; sup_changed ; _ } as t) x k p_x_0 =
+    match find_upper_bound_exn sup x with
+    | sup, _ when W.compare sup k <= 0 -> t
+    | _ | exception Not_found ->
+      Log.debug (fun m ->
+          m "Improving upper bound: %a <= %a@."
+            V.pp x W.pp_print k
+        );
+      let sup = set_upper_bound_exn ~inf sup x k p_x_0 in
+      let sup_changed = SV.add x sup_changed in
+      { t with sup ; sup_changed }
 
-  let pp ppf { graph ; potentials } =
-    Fmt.iter ~sep:Fmt.cut G.iter_edges_e (pp_edge potentials) ppf graph
+  let is_constant { inf ; sup ; _ } x =
+    match MV.find x inf, MV.find x sup with
+    | (inf, _), (sup, _) -> W.compare inf sup = 0
+    | exception Not_found -> false
 
-  let reduced_cost g e = Potential.reduced_cost e g.potentials
-
-  (* Precondition: All edges other than [e] have a nonnegative reduced cost.
-
-     Postcondition: All edges have a nonnegative reduced cost. *)
-  let restore_potential g e =
-    if W.compare (Potential.reduced_cost e g.potentials) W.zero < 0 then
-      let potentials = Potential.restore_broken_edge g.graph e g.potentials in
-      { g with potentials }
-    else
-      g
-
-  let add_edge_e g e =
-    let x = G.E.src e and y = G.E.dst e in
-    (* No need to actually add reflexive edges, but need to check them for
-       consistency *)
+  let add_edge_exn t e =
+    let x = G.E.src e and k = weight e and y = G.E.dst e in
     if G.V.equal x y then
-      if W.compare (weight e) W.zero >= 0 then
-        g
-      else
-        raise (Negative_cycle (path e))
+      (* We do not store reflexive edges, but still need to check consistency *)
+      if W.compare k W.zero >= 0 then t else negative_cycle (path e)
     else
-      (* Make sure to have at most one edge between [x] and [y]. *)
-      match G.find_edge g.graph x y with
-      | old when W.compare (weight old) (weight e) <= 0 ->
-        (* We already have a tighter constraint *)
-        assert (W.compare (reduced_cost g e) W.zero >= 0);
-        g
-      | old ->
-        Log.debug (fun m ->
-            m "Tightening %a into %a@." PP.edge old PP.edge e
-          );
-        let graph = B.remove_edge_e g.graph old in
-        restore_potential { g with graph = B.add_edge_e graph e } e
-      | exception Not_found ->
-        Log.debug (fun m ->
-            m "Adding new edge: %a@." PP.edge e
-          );
+      let t =
+        match MV.find x t.inf with
+        | (inf, inf_p) ->
+          (* x - y <= k /\ 0 - x <= -inf -> 0 - y <= -(inf - k) *)
+          add_lower_bound_exn
+            t y (inf - k) (P.append inf_p (path e))
+        | exception Not_found -> t
+      in
+      let t =
+        match MV.find y t.sup with
+        | (sup, sup_p) ->
+          (* x - y <= k /\ y - 0 <= sup -> x - 0 <= sup + k *)
+          add_upper_bound_exn
+            t x (sup + k) (P.append (path e) sup_p)
+        | exception Not_found -> t
+      in
+      if is_constant t x || is_constant t y then t
+      else
+      if W.compare (reduced_cost t.potential e) W.zero >= 0 then
+        (* Ensure only the tightest constraint is kept. *)
+        match G.find_edge t.graph x y with
+        | old ->
+          if W.compare (weight old) k <= 0 then t
+          else
+            { t with graph = B.add_edge_e (B.remove_edge_e t.graph old) e }
+        | exception Not_found ->
+          { t with graph = B.add_edge_e t.graph e }
+      else
+        (* Restore the broken potentials *)
+        let potential = restore_potential_exn t.graph t.potential e in
+        let graph = B.add_edge_e (B.remove_edge t.graph x y) e in
+        { t with graph ; potential }
 
-        restore_potential { g with graph = B.add_edge_e g.graph e } e
+  let add_delta_le_exn t x y k p =
+    add_edge_exn t (G.E.create x (k, p) y)
 
-  (* rr = nrr + k *)
-  let subst g rr nrr k p_rr_nrr =
-    let g =
-      G.fold_succ_e (fun e g ->
-          (* rr <= dst + w_rr_dst -> nrr <= dst + (w_rr_dst - k) *)
-          let dst = G.E.dst e in
-          let (w_rr_dst, p_rr_dst) = G.E.label e in
-          add_edge_e g @@
-          G.E.create nrr (W.sub w_rr_dst k, P.append p_rr_nrr p_rr_dst) dst
-        ) g.graph rr g
+  let add_delta_eq_exn t x y k p =
+    let e = G.E.create x (k, p) y in
+    let rev_e = G.E.create y (-k, p) x in
+    (* Make sure we need to restore potential at most once *)
+    if W.compare (reduced_cost t.potential e) W.zero < 0
+    then
+      let t = add_edge_exn t rev_e in
+      add_edge_exn t e
+    else
+      let t = add_edge_exn t e in
+      add_edge_exn t rev_e
+
+  let add_constraint_exn t x y k p =
+    add_delta_le_exn t x y k p
+
+  (** {2 Substitution} *)
+
+  (* Marked as incomplete because we can in general lose constraints. *)
+  let incomplete_remove t x =
+    let graph = B.remove_vertex t.graph x in
+    let potential = MV.remove x t.potential in
+    let inf = MV.remove x t.inf in
+    let sup = MV.remove x t.sup in
+    let inf_changed = SV.remove x t.inf_changed in
+    let sup_changed = SV.remove x t.sup_changed in
+    { graph ; potential ; inf ; sup ; inf_changed ; sup_changed }
+
+  (* p_rr_nrr => rr = nrr + k *)
+  let subst_exn t rr nrr k p_rr_nrr =
+    let t = add_delta_eq_exn t rr nrr k p_rr_nrr in
+    let t =
+      match lower_bound_exn t rr with
+      | lb, p_lb_rr ->
+        (* lb <= rr <-> lb <= nrr + k <-> lb - k <= nrr *)
+        add_lower_bound_exn t nrr (lb - k) (P.append p_lb_rr p_rr_nrr)
+      | exception Not_found -> t
     in
-    let g =
-      G.fold_pred_e (fun e g ->
-          (* src <= rr + w_src_rr -> src <= nrr + (w_src_rr + k) *)
-          let src = G.E.src e in
-          let (w_src_rr, p_src_rr) = G.E.label e in
-          add_edge_e g @@
-          G.E.create src (W.add w_src_rr k, P.append p_src_rr p_rr_nrr) nrr
-        ) g.graph rr g
+    let t =
+      match upper_bound_exn t rr with
+      | ub, p_rr_ub ->
+        (* rr <= ub <-> nrr + k <= ub <-> nrr <= ub - k *)
+        add_upper_bound_exn t nrr (ub - k) (P.append p_rr_nrr p_rr_ub)
+      | exception Not_found -> t
     in
-    remove_vertex g rr
+    let t =
+      if not (G.mem_vertex t.graph rr) then t
+      else
+        let t =
+          G.fold_succ_e (fun e t ->
+              (* rr <= dst + w_rr_dst -> nrr <= dst + (w_rr_dst - k) *)
+              let dst = G.E.dst e in
+              let (w_rr_dst, p_rr_dst) = G.E.label e in
+              add_edge_exn t @@
+              G.E.create nrr (w_rr_dst - k, P.append p_rr_nrr p_rr_dst) dst
+            ) t.graph rr t
+        in
+        G.fold_pred_e (fun e t ->
+            (* src <= rr + w_src_rr -> src <= nrr + (w_src_rr + k) *)
+            let src = G.E.src e in
+            let (w_src_rr, p_src_rr) = G.E.label e in
+            add_edge_exn t @@
+            G.E.create src (w_src_rr + k, P.append p_src_rr p_rr_nrr) nrr
+          ) t.graph rr t
+    in
+    (* Consider an arbitrary path [u -*-> u' -{ku}-> rr -{kv}-> v' -*-> v] in
+       the graph, where we might have [u = u'] or [v = v'].
 
-  type graph_ops =
-    { potential : g -> G.V.t -> W.t
+       By adding new edges for the successors and predecessors of [rr], we made
+       sure that we have an edge [u' -> nrr] with cost at most [ku - k] and
+       an edge [nrr -> v'] with cost at most [kv + k]. This entails a path
+
+        [u -*-> u' -> nrr -> v' -*-> v]
+
+       that is also in the graph and never longer.
+
+       Hence, we can remove [rr] from the graph without losing constraints. *)
+    incomplete_remove t rr
+
+  let assign_exn t x cte p =
+    let () =
+      match lower_bound_exn t x with
+      | lb, p_0_x when W.compare cte lb < 0 ->
+        negative_cycle (P.append p_0_x p)
+      | _ | exception Not_found -> ()
+    in
+    let () =
+      match upper_bound_exn t x with
+      | ub, p_x_0 when W.compare ub cte < 0 ->
+        negative_cycle (P.append p p_x_0)
+      | _ | exception Not_found -> ()
+    in
+    let t =
+      if not (G.mem_vertex t.graph x) then t
+      else
+        let t =
+          G.fold_succ_e (fun e t ->
+              (* x <= dst + w_rr_dst -> cte - w_rr_dst <= dst *)
+              let dst = G.E.dst e in
+              let (w_rr_dst, p_rr_dst) = G.E.label e in
+              add_lower_bound_exn
+                t dst (cte - w_rr_dst) (P.append p p_rr_dst)
+            ) t.graph x t
+        in
+        G.fold_pred_e (fun e t ->
+            (* src <= x + w_src_rr -> src <= cte + w_src_rr *)
+            let src = G.E.src e in
+            let (w_src_rr, p_src_rr) = G.E.label e in
+            add_upper_bound_exn
+              t src (cte + w_src_rr) (P.append p_src_rr p)
+          ) t.graph x t
+    in
+    (* Consider an arbitrary path [u -*-> u' -{ku}-> x -{kv}-> v' -*-> v] in the
+       graph, where we might have [u = u'] or [v = v'].
+
+       By updating the bounds of the predecessors and successors of [x], we
+       make sure that we have [sup u' <= ku + cte] and [kv - cte <= inf v'], so
+       that the path
+
+         [u -*-> u' -{sup u'}-> 0 -{-inf v'}-> v' -*-> v]
+
+       is also in the graph and never longer.
+
+       Hence, we can remove [x] from the graph without losing constraints. *)
+    incomplete_remove t x
+
+  (** {2 Solving} *)
+
+  type 'pi graph_ops =
+    { potential : 'pi -> G.V.t -> W.t
     ; iter_succ_e : (G.E.t -> unit) -> G.t -> G.V.t -> unit
     ; src : G.E.t -> G.V.t
     ; dst : G.E.t -> G.V.t
     ; append : P.t -> P.t -> P.t }
 
-  let wrap_iter iter f g v =
-    if G.mem_vertex g v then iter f g v
-
-  let forward_ops =
-    { src = G.E.src
-    ; dst = G.E.dst
-    ; iter_succ_e = wrap_iter G.iter_succ_e
-    ; potential = potential
-    ; append = P.append }
-
-  let backward_ops =
-    { src = G.E.dst
-    ; dst = G.E.src
-    ; iter_succ_e = wrap_iter G.iter_pred_e
-    ; potential = (fun g v -> -potential g v)
-    ; append = (fun p q -> P.append q p) }
-end
-
-module type REF = sig
-  type 'a t
-
-  val create : 'a -> 'a t
-
-  val get : 'a t -> 'a
-
-  val set : 'a t -> 'a -> 'a t
-end
-
-module Impl
-    (W : WEIGHT)
-    (P : PATH)
-    (B : Graph.Builder.S with type G.E.label = W.t * P.t)
-    (S : Set.S with type elt = B.G.V.t)
-    (HM : Graph.Blocks.HM with type key = B.G.V.t)
-    (R : REF)
-    (PP : sig val vertex : B.G.V.t Fmt.t val edge : B.G.E.t Fmt.t end)=
-struct
-  include Core(W)(P)(B)(HM)(PP)
-
-  module G = B.G
-
-  open WeightNotations(W)
-
-  type bound = (W.t * P.t) HM.t
-
-  type bounds = { inf : bound ; sup : bound }
-
-  type bound_ops =
-    { get : bounds -> G.V.t -> W.t * P.t
-    ; set : bounds -> G.V.t -> W.t -> P.t -> bounds }
+  type 'b bound_ops =
+    { get_exn : 'b -> G.V.t -> W.t * P.t
+    (* Raises [Not_found] if there is no bound. *)
+    ; set_exn : 'b -> G.V.t -> W.t -> P.t -> 'b
+    (* Raises [Negative_cycle] if the new bound is inconsistent. *)
+    }
 
   (* Given a graph [(g, b, changed)] that satisfy partial transitivity,
      [tighten_ops] tightens the bound [b'] such that the graph [(g, b, empty)]
@@ -482,6 +840,18 @@ struct
 
       For any vertex [v], the shortest path from [0] to [v] has length [-min v].
 
+     This algorithm is similar to [restore_broken_potential] in that it also
+     uses a limited variant of Dijkstra's algorithm, but the limitations are
+     different enough that it warrants its own separate implementation. In
+     [restore_broken_potential], we are looking for the shortest paths starting
+     from a specific vertex [x] with a negative weight. In [tighten_ops], we
+     are looking at changed paths (positive or negative) that might improve
+     the bounds associated with a vertex.
+
+     Note that the description for [tighten_ops] assumes that we are tightening
+     the lower bound in the original graph, but equivalently we could be
+     tightening the upper bound in the mirror graph.
+
      Let us assume that [v] is an unchanged vertex such that the shortest path
      from [0] to [v] has length [sp(0, v) < spu(0, v)] where [spu(0, v)] is the
      shortest path from [0] to [v] with only unchanged vertices.
@@ -493,27 +863,33 @@ struct
 
      Hence, it is only necessary to consider the paths that {b start} by an edge
      from [0] to a changed vertex. *)
-  let tighten_ops gops g bops b changed =
-    (* Compute [ground] as a virtual [potential 0].
+  let tighten_ops gops g pi bops b changed =
+    (* Compute [ground] as a potential for the virtual vertex [0].
 
        We ensure that [ground - min v - potential v >= 0] holds for {b changed}
        vertices only. *)
-    let acc = ref None in
-    S.iter (fun v ->
-        let inf, _ = bops.get b v in
-        let minv' = inf + gops.potential g v in
-        match !acc with
-        | Some ground ->
-          if W.compare minv' ground > 0 then acc := Some minv'
-        | None ->
-          acc := Some minv'
-      ) changed;
+    assert (not (SV.is_empty changed));
     let ground =
-      match !acc with
-      | Some acc -> acc
+      match
+        SV.fold (fun v ground_opt ->
+            match bops.get_exn b v with
+            | exception Not_found ->
+              (* [v] is in [changed] and hence must have a defined bound. *)
+              assert false
+            | inf, _ ->
+              let minv' = inf + gops.potential pi v in
+              match ground_opt with
+              | Some ground ->
+                if W.compare minv' ground > 0 then Some minv'
+                else ground_opt
+              | None ->
+                Some minv'
+          ) changed None
+      with
+      | Some ground -> ground
       | None ->
-        (* Any value works here, we will not do anything *)
-        W.zero
+        (* [changed] must not be empty *)
+        assert false
     in
 
     let visited = Vtbl.create 97 in
@@ -539,7 +915,7 @@ struct
              [weight elt + potential s - ground] is the weight of that path in
              the original graph, which induces a new lower bound [new_min] for
              [s] (the lower bound is the negation of the length). *)
-          let new_min_s = ground - elt.weight - gops.potential g s in
+          let new_min_s = ground - elt.weight - gops.potential pi s in
 
           (* If [s] is a changed vertex, we always need to consider further
              paths going through [s]: any path going through [s] goes through a
@@ -554,16 +930,16 @@ struct
              [v] going through [s] cannot improve on the edge from [0] to [v] of
              length [-min v]. *)
           if
-            S.mem s changed ||
-            (match fst @@ bops.get b s with
+            SV.mem s changed ||
+            (match fst @@ bops.get_exn b s with
              | lb -> W.compare new_min_s lb > 0
              | exception Not_found -> true)
           then (
-            let potential_s = elt.weight + gops.potential g s in
+            let potential_s = elt.weight + gops.potential pi s in
             gops.iter_succ_e (fun edge ->
                 let t = gops.dst edge in
                 if not (Vtbl.mem visited t) then (
-                  let dt = potential_s + weight edge - gops.potential g t in
+                  let dt = potential_s + weight edge - gops.potential pi t in
                   let improved =
                     try W.compare dt (Vtbl.find distance t) < 0
                     with Not_found -> true
@@ -576,577 +952,101 @@ struct
                       ; path = gops.append elt.path (path edge) }
                   )
                 )
-              ) g.graph s;
+              ) g s;
 
             Log.debug (fun m ->
-                m "Improving %a to %a@." PP.vertex s W.pp_print new_min_s
+                m "Improving %a to %a@." V.pp s W.pp_print new_min_s
               );
-            loop (bops.set b s new_min_s elt.path)
+            loop (bops.set_exn b s new_min_s elt.path)
           ) else
             loop b
         )
     in
 
-    S.iter (fun v ->
-        let inf, path = bops.get b v in
-        let distance_v = ground - inf - gops.potential g v in
-        Vtbl.replace distance v distance_v;
-        H.insert pq
-          { target = v
-          ; weight = distance_v
-          ; path = path }
+    SV.iter (fun v ->
+        match bops.get_exn b v with
+        | exception Not_found ->
+          (* [v] is in [changed] and hence must have a finite bound. *)
+          assert false
+        | inf, path ->
+          let distance_v = ground - inf - gops.potential pi v in
+          Vtbl.replace distance v distance_v;
+          H.insert pq
+            { target = v
+            ; weight = distance_v
+            ; path = path }
       ) changed;
     loop b
 
-  let set_lower_bound ~notify bounds v w p =
-    match HM.find v bounds.sup with
-    | sup, sup_p when W.compare w sup > 0 ->
-      (* p is a path from 0 to v proving w <= v
-          sup_p is a path from v to 0 proving v <= sup
-          the concatenation is a negative cycle starting in [0] *)
-      raise (Negative_cycle (P.append p sup_p))
-    | _ | exception Not_found ->
-      notify v;
-      Log.debug (fun m ->
-          m "Setting lower bound for %a to %a because: %a@."
-            PP.vertex v W.pp_print w P.pp p);
-      { bounds with inf = HM.add v (w, p) bounds.inf }
+  let wrap_iter iter f g v =
+    if G.mem_vertex g v then iter f g v
 
-  let set_upper_bound ~notify bounds v w p =
-    match HM.find v bounds.inf with
-    | inf, inf_p when W.compare w inf < 0 ->
-      (* p is a path from v to 0 proving v <= w
-          inf_p is a path from 0 to v proving inf <= v
-          the concatenation is a negative cycle starting in [0] *)
-      raise (Negative_cycle (P.append inf_p p))
-    | _ | exception Not_found ->
-      notify v;
-      { bounds with sup = HM.add v (w, p) bounds.sup }
+  let forward_ops =
+    { src = G.E.src
+    ; dst = G.E.dst
+    ; iter_succ_e = wrap_iter G.iter_succ_e
+    ; potential = potential
+    ; append = P.append }
 
-  let tighten_inf ~notify g b changed =
-    let get { inf; _ } v = HM.find v inf
-    and set = set_lower_bound ~notify in
-    tighten_ops forward_ops g { get; set } b changed
+  let backward_ops =
+    { src = G.E.dst
+    ; dst = G.E.src
+    ; iter_succ_e = wrap_iter G.iter_pred_e
+    ; potential = (fun pi v -> -potential pi v)
+    ; append = (fun p q -> P.append q p) }
 
-  let tighten_sup ~notify g b changed =
-    let get { sup; _ } v =
-      let (w, p) = HM.find v sup in
-      (-w, p)
-    and set bounds v w p = set_upper_bound ~notify bounds v (-w) p in
-    tighten_ops backward_ops g { get; set } b changed
-
-  type t =
-    { graph : g
-    ; bounds : bounds
-    ; inf_changed : S.t R.t
-    ; sup_changed : S.t R.t }
-  (* We maintain the following invariants for [inf] (the same invariants hold
-     for [sup] in the mirror graph):
-
-     - We say that a vertex [x] has changed if it is in [inf_changed] and is
-        unchanged otherwise.
-
-     - The shortest path from [0] to an {b unchanged} vertex [x] that only goes
-        through unchanged vertices has length [-min x] (in particular, the edge
-        from [0] to [x] in [bounds] is such a path).
-
-     - The shortest path from [0] to a {b changed} vertex [x] that only goes
-        through unchanged vertices (except for [x]), if it exists, is longer
-        than [-min x].
-
-     If [x] and [y] are unchanged vertices, and there is a path of length [k]
-     from [x] to [y] that only goes through unchanged vertices, it induces a
-     path of length [-min x + k] from [0] to [y] hence we have:
-
-      [-min y <= -min x + k]
-
-     In particular, [-min y <= -min x + sp(x, y)] where [sp(x, y)] is the length
-     of the shortest {b unchanged} path from [x] to [y].
-
-     Adding a new edge from [x] to [y] of length [k] might break this invariant
-     if it induces a path from [0] to some unchanged vertex [z] of shorter
-     length than [-min z].
-
-     This new path must use the edge from [x] to [y]. We must have a path from
-     [0] to [x], then a path from [x] to [y], then a path from [y] to [z].
-
-     This is only possible if the path from [0] to [y] that goes through [x] is
-     shorter than the existing path from [0] to [y].
-
-     Hence, this is only possible if [y] becomes changed.
-
-     Hence, this new path would go through the changed vertex [y].
-
-     Hence, we do not break the invariant. *)
-
-  let pp_lower_bound ppf (v, (lb, _ex)) =
-    Fmt.pf ppf "%a <= %a" W.pp_print lb PP.vertex v
-
-  let pp_upper_bound ppf (v, (lb, _ex)) =
-    Fmt.pf ppf "%a <= %a" PP.vertex v W.pp_print lb
-
-  let pp : t Fmt.t = fun ppf t ->
-    let needs_cut = ref false in
-    let cut_if_needed () =
-      if !needs_cut then Fmt.cut ppf ();
-      needs_cut := true
-    in
-
-    if not (G.is_empty t.graph.graph) then (
-      cut_if_needed ();
-      Fmt.iter ~sep:Fmt.cut G.iter_edges_e (Fmt.box PP.edge) ppf t.graph.graph
-    );
-
-    if not (HM.is_empty t.bounds.inf) then (
-      cut_if_needed ();
-      Fmt.iter_bindings ~sep:Fmt.cut HM.iter (Fmt.box pp_lower_bound)
-        ppf t.bounds.inf
-    );
-
-    if not (HM.is_empty t.bounds.sup) then (
-      cut_if_needed ();
-      Fmt.iter_bindings ~sep:Fmt.cut HM.iter (Fmt.box pp_upper_bound)
-        ppf t.bounds.sup
-    )
-
-  let pp = Fmt.vbox pp
-
-  type improvement = { inf_improved : S.t ; sup_improved : S.t }
-
-  let is_constant { inf; sup } v =
-    match HM.find v inf, HM.find v sup with
-    | (inf, _), (sup, _) -> W.compare inf sup = 0
-    | exception Not_found -> false
-
-  let needs_propagation { inf_changed; sup_changed; _ } =
-    not (S.is_empty (R.get inf_changed) && S.is_empty (R.get sup_changed))
-
-  let solve_exn { graph; bounds; inf_changed; sup_changed } =
-    let inf_changed = R.get inf_changed and sup_changed = R.get sup_changed in
-    let inf_improved = ref S.empty in
-    let notify_inf v = inf_improved := S.add v !inf_improved in
-    let bounds =
-      if not (S.is_empty inf_changed) then
-        tighten_inf ~notify:notify_inf graph bounds inf_changed
-      else
-        bounds
-    in
-    let sup_improved = ref S.empty in
-    let notify_sup v = sup_improved := S.add v !sup_improved in
-    let bounds =
-      if not (S.is_empty sup_changed) then
-        tighten_sup ~notify:notify_sup graph bounds sup_changed
-      else
-        bounds
-    in
-    let remove_if_constant v (graph : g) =
-      if is_constant bounds v then
-        remove_vertex graph v
-      else
-        graph
-    in
-    let graph =
-      S.fold remove_if_constant sup_changed @@
-      S.fold remove_if_constant inf_changed @@
-      graph
-    in
-    { inf_improved = !inf_improved ; sup_improved = !sup_improved },
-    { graph
-    ; bounds
-    ; inf_changed = R.create S.empty
-    ; sup_changed = R.create S.empty }
-
-  let add_lower_bound bounds inf_changed x k p =
-    match HM.find x bounds.inf with
-    | inf, _ when W.compare inf k >= 0 ->
-      (bounds, inf_changed)
-    | _ | exception Not_found ->
-      Log.debug (fun m ->
-          m "Improving lower bound: %a <= %a@."
-            W.pp_print k PP.vertex x
-        );
-      let bounds = set_lower_bound ~notify:ignore bounds x k p in
-      (bounds, (R.set inf_changed (S.add x (R.get inf_changed))))
-
-  let add_upper_bound bounds sup_changed x k p =
-    match HM.find x bounds.sup with
-    | sup, _ when W.compare sup k <= 0 ->
-      (bounds, sup_changed)
-    | _ | exception Not_found ->
-      Log.debug (fun m ->
-          m "Improving upper bound: %a <= %a@."
-            PP.vertex x W.pp_print k
-        );
-      let b = set_upper_bound ~notify:ignore bounds x k p in
-      (b, (R.set sup_changed (S.add x (R.get sup_changed))))
-
-  let lower_bound_exn { bounds; _ } x =
-    HM.find x bounds.inf
-
-  let upper_bound_exn { bounds; _ } x =
-    HM.find x bounds.sup
-
-  let add_edge_e { graph; bounds; inf_changed; sup_changed } e =
-    (* First update the bounds, then add the edge.
-
-       If either end is known to be constant, we don't need to actually add the
-       edge: bounds propagation is sufficient since it is closed under
-       transitive paths. *)
-
-    let x = G.E.src e and k = weight e and y = G.E.dst e in
-    let bounds, inf_changed =
-      match HM.find x bounds.inf with
-      | (inf, inf_p) ->
-        (* x - y <= k /\ 0 - x <= -inf -> 0 - y <= -(inf - k) *)
-        add_lower_bound
-          bounds inf_changed y (inf - k) (P.append inf_p (path e))
-      | exception Not_found ->
-        bounds, inf_changed
-    in
-    let bounds, sup_changed =
-      match HM.find y bounds.sup with
-      | (sup, sup_p) ->
-        (* x - y <= k /\ y - 0 <= sup -> x - 0 <= sup + k *)
-        add_upper_bound
-          bounds sup_changed x (sup + k) (P.append (path e) sup_p)
-      | exception Not_found ->
-        bounds, sup_changed
-    in
-    if not (is_constant bounds x || is_constant bounds y) then
-      (* If the lower bound for [y] has changed, we need to to inf prop? *)
-      (* If the upper bound for [x] has changed, we need to to sup prop? *)
-      { graph = add_edge_e graph e ; bounds ; inf_changed ; sup_changed }
+  let tighten_inf_exn ~notify ({ inf ; sup ; inf_changed ; _ } as t) =
+    if SV.is_empty inf_changed then t
     else
-      { graph ; bounds ; inf_changed ; sup_changed }
+      let get_exn inf v = MV.find v inf
+      and set_exn inf v w p =
+        let inf = set_lower_bound_exn ~sup inf v w p in
+        notify v; inf
+      in
+      let bops = { get_exn ; set_exn } in
+      let inf =
+        tighten_ops forward_ops t.graph t.potential bops inf inf_changed
+      in
+      { t with inf ; inf_changed = SV.empty }
 
-  let add_lower_bound t x k p =
-    let bounds, inf_changed = add_lower_bound t.bounds t.inf_changed x k p in
-    { t with bounds; inf_changed }
-
-  let add_upper_bound t x k p =
-    Log.debug (fun m -> m "ADDING UPPER BOUND: %a <= %a@."
-                  PP.vertex x W.pp_print k
-              );
-    let bounds, sup_changed = add_upper_bound t.bounds t.sup_changed x k p in
-    { t with bounds; sup_changed }
-
-  let add_delta_le t x y k p =
-    add_edge_e t (G.E.create x (k, p) y)
-
-  let add_delta_eq t x y k p =
-    let e = G.E.create x (k, p) y in
-    let rev_e = G.E.create y (-k, p) x in
-    (* Make sure we need to restore potential at most once *)
-    if
-      W.compare (reduced_cost t.graph e) W.zero < 0
-    then
-      let t = add_edge_e t rev_e in
-      add_edge_e t e
+  let tighten_sup_exn ~notify ({ inf ; sup ; sup_changed ; _ } as t) =
+    if SV.is_empty sup_changed then t
     else
-      let t = add_edge_e t e in
-      add_edge_e t rev_e
+      let get_exn sup v =
+        let (w, p) = MV.find v sup in
+        (-w, p)
+      and set_exn sup v w p =
+        let sup = set_upper_bound_exn ~inf sup v (-w) p in
+        notify v; sup
+      in
+      let bops = { get_exn ; set_exn } in
+      let sup =
+        tighten_ops backward_ops t.graph t.potential bops sup sup_changed
+      in
+      { t with sup ; sup_changed = SV.empty }
 
-  (* rr = nrr + k *)
-  let subst t rr nrr k p =
-    assert (not (G.V.equal rr nrr));
-    let t = add_delta_eq t rr nrr k p in
-    let t =
-      match lower_bound_exn t rr with
-      | lb, p_lb_x ->
-        (* lb <= x <-> lb <= y + k <-> lb - k <= y *)
-        add_lower_bound t nrr (W.sub lb k) (P.append p_lb_x p)
-      | exception Not_found -> t
+  let remove_if_constant x t =
+    if not (is_constant t x) then t
+    else
+      (* Note: remove from the graph but not the bounds. *)
+      let graph = B.remove_vertex t.graph x in
+      let potential = MV.remove x t.potential in
+      { t with graph ; potential }
+
+  let is_sat { inf_changed ; sup_changed ; _ } =
+    SV.is_empty inf_changed && SV.is_empty sup_changed
+
+  let solve_exn ?(notify = ignore) t =
+    let to_check = ref SV.empty in
+    let notify v =
+      to_check := SV.add v !to_check;
+      notify v
     in
-    let t =
-      match upper_bound_exn t rr with
-      | ub, p_x_ub ->
-        (* x <= ub <-> y + k <= ub <-> y <= ub - k *)
-        add_upper_bound t nrr (W.sub ub k) (P.append p p_x_ub)
-      | exception Not_found -> t
-    in
-    let bounds =
-      { inf = HM.remove rr t.bounds.inf ; sup = HM.remove rr t.bounds.sup }
-    in
-    let inf_changed =
-      R.set t.inf_changed (S.add nrr @@ S.remove rr @@ R.get t.inf_changed)
-    in
-    let sup_changed =
-      R.set t.sup_changed (S.add nrr @@ S.remove rr @@ R.get t.sup_changed)
-    in
-    let graph = subst t.graph rr nrr k p in
-    { graph ; bounds ; inf_changed ; sup_changed }
+    let t = tighten_inf_exn ~notify t in
+    let t = tighten_sup_exn ~notify t in
+    (* The graph is currently tight, so a path [u -> x -> 0] (resp.
+       [0 -> x -> u]) through a constant vertex [x] is never shorter than the
+       corresponding path [u -> 0] (resp. [0 -> u]) that does not go through
+       [x]. *)
+    SV.fold remove_if_constant !to_check t
 end
-
-module Sig = struct
-  module type S = sig
-    type t
-
-    type vertex
-
-    type weight
-
-    type path
-    (** A path represents a series of {b true} difference constraints.
-
-        Consecutive elements in the path share a variable that can be
-        eliminated, so that a path
-
-          [x1 - x2 <= k1 ; x2 - x3 <= k2 ; x3 - x4 <= k3]
-
-        from [x1] to [x4] justifies the inequality
-
-          [x1 - x4 <= k1 + k2 + k3] *)
-
-    val lower_bound_exn : t -> vertex -> weight * path
-    (** [lower_bound_exn t v] returns a pair [(w, p)] where [w] is the current
-        lower bound for [v] and [p] is a path from [0] to [v] of length [w].
-
-        @raise Not_found if [v] has no lower bound. *)
-
-    val upper_bound_exn : t -> vertex -> weight * path
-    (** [upper_bound_exn t v] returns a pair [(w, p)] where [w] is the current
-        upper bound for [v] and [p] is a path from [v] to [0] of length [w].
-
-        @raise Not_found if [v] has no upper bound. *)
-
-    module S : Set.S with type elt = vertex
-
-    type improvement = { inf_improved : S.t ; sup_improved : S.t }
-    (** This type is used by [solve_exn] to indicate variables whose lower/upper
-        bounds have been improved during solving. *)
-  end
-
-  module type P = sig
-    include S
-
-    val empty : t
-    (** Empty solver with no constraints. *)
-
-    val add_lower_bound : t -> vertex -> weight -> path -> t
-    (** [add_upper_bound t x k p] adds the constraint [k <= x]. [p] is a path
-        that justifies adding this constraint.
-
-        {b Note}: This function delays actual propagation of the constraint
-        until the next call to [solve].
-
-        @raises Negative_cycle if [k] is higher than [x]'s upper bound. *)
-
-    val add_upper_bound : t -> vertex -> weight -> path -> t
-    (** [add_upper_bound t x k p] adds the constraint [x <= k]. [p] is a path
-        that justifies adding this constraint.
-
-        {b Note}: This function delays actual propagation of the constraint
-        until the next call to [solve].
-
-        @raises Negative_cycle if [k] is smaller than [x]'s lower bound. *)
-
-    val add_delta_le : t -> vertex -> vertex -> weight -> path -> t
-    (** [add_delta_eq t x y k p] adds the constraint [x - y <= k]. [p] is a path
-        that justifies adding this constraint.
-
-        @raises Negative_cycle if a negative cycle is found while processing the
-        constraint. *)
-
-    val add_delta_eq : t -> vertex -> vertex -> weight -> path -> t
-    (** [add_delta_eq t x y k p] adds the constraint [x - y = k]. [p] is a path
-        that justifies adding this constraint.
-
-        [add_delta_eq] is logically equivalent to calling [add_delta_le] twice,
-        but it is guaranteed to perform at most one graph traversal and can
-        be more efficient.
-
-        @raises Negative_cycle if a negative cycle is found while processing the
-        constraint. *)
-
-    val subst : t -> vertex -> vertex -> weight -> path -> t
-    (** [subst t x y k p] {b replaces} the vertex [x] with [y + k]. [p] is a
-        path that justifies the equality [x - y = k].
-
-        [subst] is similar to [add_delta_eq], except that [x] is removed from
-        the graph entirely: any constraint [z - x <= k'] is replaced with a new
-        constraint [z - y <= k' + k], and any constraint [x - z <= k'] is
-        replaced with a new constraint [y - z <= k' - k].
-
-        @raises Negative_cycle if a negative cycle is found while processing the
-        constraint. *)
-
-    val needs_propagation : t -> bool
-
-    val solve_exn : t -> improvement * t
-    (** If the system has a solution, returns a pair [improvement, t] where
-        [improvement] contains information about the bounds that have been
-        tightened since the last call to [solve].
-
-        It is possible that [improvement] includes bounds that were updated
-        through [add_lower_bound] or [add_upper_bound] but were not changed by
-        [solve].
-
-        If the system has no solution, raises a [Negative_cycle] exception. The
-        path in the negative cycle is guaranteed to start and end on [0]. *)
-  end
-end
-
-module type VERTEX = sig
-  include Graph.Sig.COMPARABLE
-
-  val pp : t Fmt.t
-end
-
-module Make(V : VERTEX)(W : WEIGHT)(P : PATH) = struct
-  module E = struct
-    type t = W.t * P.t
-
-    let compare (x, _) (y, _) = W.compare x y
-
-    let default = W.zero, P.empty
-  end
-
-  module Persistent = struct
-    module G = Graph.Persistent.Digraph.ConcreteBidirectionalLabeled(V)(E)
-
-    module B = Graph.Builder.P(G)
-
-    module HM = Graph.Blocks.Make_Map(V)
-
-    module R = struct
-      type 'a t = 'a
-
-      let create x = x
-
-      let get x = x
-
-      let set _ x = x
-    end
-
-    module S = Set.Make(V)
-
-    module PP = struct
-      let vertex = V.pp
-
-      let edge ppf (x, (z, _), y) =
-        Fmt.pf ppf "%a - %a <= %a"
-          V.pp x V.pp y W.pp_print z
-    end
-
-    module M = Impl (W)(P)(B)(S)(HM)(R)(PP)
-
-    exception Negative_cycle = M.Negative_cycle
-
-    type t = M.t
-
-    let pp = M.pp
-
-    let empty =
-      let graph = B.empty () in
-      let potentials = HM.empty in
-      let bounds = M.{ inf = HM.empty ; sup = HM.empty } in
-      let inf_changed = S.empty in
-      let sup_changed = S.empty in
-      M.{ graph = M.create graph potentials
-        ; bounds
-        ; inf_changed
-        ; sup_changed }
-
-    let needs_propagation = M.needs_propagation
-
-    let solve_exn = M.solve_exn
-
-    let lower_bound_exn = M.lower_bound_exn
-
-    let add_lower_bound = M.add_lower_bound
-
-    let upper_bound_exn = M.upper_bound_exn
-
-    let add_upper_bound = M.add_upper_bound
-
-    let add_delta_le = M.add_delta_le
-
-    let add_delta_eq = M.add_delta_eq
-
-    let subst = M.subst
-  end
-
-  module Imperative = struct
-    module G = Graph.Imperative.Digraph.ConcreteBidirectionalLabeled(V)(E)
-
-    module B = Graph.Builder.I(G)
-
-    module HM = Graph.Blocks.Make_Hashtbl(V)
-
-    module R = struct
-      type 'a t = 'a ref
-
-      let create x = ref x
-
-      let get x = !x
-
-      let set x v = x := v; x
-    end
-
-    module S = Set.Make(V)
-
-    module PP = struct
-      let vertex = V.pp
-
-      let edge ppf (x, (z, _), y) =
-        Fmt.pf ppf "%a -{%a}-> %a"
-          V.pp x W.pp_print z V.pp y
-    end
-
-    module M = Impl (W)(P)(B)(S)(HM)(R)(PP)
-
-    let create ?size () =
-      let graph = B.empty () in
-      let potentials = HM.create ?size () in
-      let bounds = M.{ inf = HM.create ?size () ; sup = HM.create ?size () } in
-      let inf_changed = ref S.empty in
-      let sup_changed = ref S.empty in
-      M.{ graph = M.create graph potentials
-        ; bounds
-        ; inf_changed
-        ; sup_changed }
-
-    let solve_exn t =
-      let improvement, _ = M.solve_exn t in
-      improvement
-
-    let lower_bound_exn = M.lower_bound_exn
-
-    let add_lower_bound t x k p =
-      ignore (M.add_lower_bound t x k p)
-
-    let upper_bound_exn = M.upper_bound_exn
-
-    let add_upper_bound t x k p =
-      ignore (M.add_upper_bound t x k p)
-
-    let add_delta_le t x y k p =
-      ignore (M.add_delta_le t x y k p)
-
-    let add_delta_eq t x y k p =
-      ignore (M.add_delta_eq t x y k p)
-  end
-end
-
-module Path_explanation = struct
-  type t = Explanation.t
-
-  let pp = Explanation.print
-
-  let empty = Explanation.empty
-
-  let append = Explanation.union
-end
-
-module E = Make(struct include Expr let pp = print end)(Z)(Path_explanation)
-module X = Make(struct
-    type t = Shostak.Combine.r
-
-    let hash = Shostak.Combine.hash
-
-    let equal = Shostak.Combine.equal
-
-    let compare = Shostak.Combine.str_cmp
-
-    let pp = Shostak.Combine.print
-  end)(Z)(Path_explanation)
