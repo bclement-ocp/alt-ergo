@@ -33,6 +33,7 @@ See more details on https://alt-ergo.ocamlpro.com/")
   dune-site
   (cmdliner (>= 1.1.0))
   (odoc :with-doc)
+  ocamlgraph
  )
 
  (sites (share preludes) (lib plugins))
