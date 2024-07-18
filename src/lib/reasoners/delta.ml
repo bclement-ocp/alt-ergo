@@ -384,7 +384,7 @@ struct
     try MV.find v pi with Not_found -> W.zero
 
   let pp_vertex pi ppf v =
-    Fmt.pf ppf "%a [pi = %a]" V.pp v W.pp_print (potential pi v)
+    Fmt.pf ppf "%a [= %a]" V.pp v W.pp_print (-potential pi v)
 
   let pp_edge pi ppf e =
     Fmt.pf ppf "@[%a - %a <= %a@ %a@]"
@@ -472,6 +472,13 @@ struct
 
   module Vtbl = Hashtbl.Make(G.V)
 
+  let wrap_iter iter f g v =
+    if G.mem_vertex g v then iter f g v
+
+  let iter_succ_e f g v = wrap_iter G.iter_succ_e f g v
+
+  let iter_pred_e f g v = wrap_iter G.iter_pred_e f g v
+
   (* Precondition: All edges in [g] have a nonnegative reduced cost.
      Precondition: [e] has a negative reduced cost.
 
@@ -533,7 +540,7 @@ struct
 
             (* Fix the negative slack for s then propagate forward *)
             let new_potential_s = potential pi s + w in
-            G.iter_succ_e (fun edge ->
+            iter_succ_e (fun edge ->
                 let t = G.E.dst edge in
                 if not (Vtbl.mem visited t) then (
                   (* The shortest path in the reduced graph from [x] to [s]
@@ -679,7 +686,10 @@ struct
       else
         (* Restore the broken potentials *)
         let potential = restore_potential_exn t.graph t.potential e in
-        let graph = B.add_edge_e (B.remove_edge t.graph x y) e in
+        let graph =
+          if G.mem_edge t.graph x y then B.remove_edge t.graph x y else t.graph
+        in
+        let graph = B.add_edge_e graph e in
         { t with graph ; potential }
 
   let add_delta_le_exn t x y k p =
@@ -978,20 +988,17 @@ struct
       ) changed;
     loop b
 
-  let wrap_iter iter f g v =
-    if G.mem_vertex g v then iter f g v
-
   let forward_ops =
     { src = G.E.src
     ; dst = G.E.dst
-    ; iter_succ_e = wrap_iter G.iter_succ_e
+    ; iter_succ_e = iter_succ_e
     ; potential = potential
     ; append = P.append }
 
   let backward_ops =
     { src = G.E.dst
     ; dst = G.E.src
-    ; iter_succ_e = wrap_iter G.iter_pred_e
+    ; iter_succ_e = iter_pred_e
     ; potential = (fun pi v -> -potential pi v)
     ; append = (fun p q -> P.append q p) }
 

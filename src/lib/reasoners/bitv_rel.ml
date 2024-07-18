@@ -682,7 +682,7 @@ module DX = Delta.Make(Z)(struct
     let default = X.bot
     type value = Z.t
     let lower_bound_exn _ = Z.zero
-    let upper_bound_exn r = Z.(one lsl (bitwidth r))
+    let upper_bound_exn r = Z.extract Z.minus_one 0 (bitwidth r)
   end)(struct
     type t = Ex.t
     let pp = Ex.print
@@ -727,8 +727,8 @@ module Delta_domain = struct
       if Z.compare (Z.sub x_k y_k) k <= 0 then delta
       else raise (DX.Negative_cycle ex)
     | Constant x_k, (Atom (y, y_k) | Composite (y, y_k)) ->
-      (* x_k - (y + y_k) <= k => k - x_k + y_k <= y *)
-      DX.add_lower_bound_exn delta y Z.(k - x_k + y_k) ex
+      (* x_k - (y + y_k) <= k => x_k - y_k - k <= y *)
+      DX.add_lower_bound_exn delta y Z.(x_k - y_k - k) ex
     | (Atom (x, x_k) | Composite (x, x_k)), Constant y_k ->
       (* x + x_k - y_k <= k => x <= k + y_k - x_k *)
       DX.add_upper_bound_exn delta x Z.(k + y_k - x_k) ex
