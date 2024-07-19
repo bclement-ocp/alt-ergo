@@ -747,7 +747,7 @@ module Delta_domain = struct
 end
 
 module Constraint : sig
-  type binop =
+  type binop = private
     (* Bitwise operations *)
     | Band | Bor | Bxor
     (* Arithmetic operations *)
@@ -755,15 +755,15 @@ module Constraint : sig
     (* Shift operations *)
     | Bshl | Blshr
 
-  type fun_t =
+  type fun_t = private
     | Fbinop of binop * X.r * X.r
 
-  type binrel = Rule | Rugt
+  type binrel = private Rule | Rugt
 
-  type rel_t =
+  type rel_t = private
     | Rbinrel of binrel * X.r * X.r
 
-  type view =
+  type view = private
     | Cfun of X.r * fun_t
     | Crel of rel_t
 
@@ -2080,6 +2080,7 @@ let rec propagate_all uf eqs bdom idom delta =
     let bdom, idom =
       Bitlist_domains.snapshot bdom, Interval_domains.snapshot idom
     in
+
     let eqs, (bdom, idom) = simplify_all uf eqs seen_constraints (bdom, idom) in
 
     (* Propagate again in case constraints were simplified. *)

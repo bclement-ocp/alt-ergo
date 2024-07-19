@@ -439,8 +439,18 @@ struct
   let mem t x =
     G.mem_vertex t.graph x || MV.mem x t.inf || MV.mem x t.sup
 
+  let find_lower_bound_exn inf x =
+    try MV.find x inf with Not_found -> V.lower_bound_exn x, P.empty
+
+  let lower_bound_exn t x = find_lower_bound_exn t.inf x
+
+  let find_upper_bound_exn sup x =
+    try MV.find x sup with Not_found -> V.upper_bound_exn x, P.empty
+
+  let upper_bound_exn t x = find_upper_bound_exn t.sup x
+
   let set_lower_bound_exn ~sup inf x k p =
-    match MV.find x sup with
+    match find_upper_bound_exn sup x with
     | sup, sup_p when W.compare k sup > 0 ->
       (* p is a path from 0 to v proving w <= v
           sup_p is a path from v to 0 proving v <= sup
@@ -450,7 +460,7 @@ struct
       MV.add x (k, p) inf
 
   let set_upper_bound_exn ~inf sup v w p =
-    match MV.find v inf with
+    match find_lower_bound_exn inf v with
     | inf, inf_p when W.compare w inf < 0 ->
       (* p is a path from v to 0 proving v <= w
           inf_p is a path from 0 to v proving inf <= v
@@ -612,11 +622,6 @@ struct
           set_potential pi' v (potential pi v + slack)
         ) distance pi
 
-  let find_lower_bound_exn inf x =
-    try MV.find x inf with Not_found -> V.lower_bound_exn x, P.empty
-
-  let lower_bound_exn t x = find_lower_bound_exn t.inf x
-
   let add_lower_bound_exn ({ inf ; sup ; inf_changed ; _ } as t) x k p_0_x =
     match find_lower_bound_exn inf x with
     | inf, _ when W.compare inf k >= 0 -> t
@@ -627,11 +632,6 @@ struct
       let inf = set_lower_bound_exn ~sup inf x k p_0_x in
       let inf_changed = SV.add x inf_changed in
       { t with inf ; inf_changed }
-
-  let find_upper_bound_exn sup x =
-    try MV.find x sup with Not_found -> V.upper_bound_exn x, P.empty
-
-  let upper_bound_exn t x = find_upper_bound_exn t.sup x
 
   let add_upper_bound_exn ({ inf ; sup ; sup_changed ; _ } as t) x k p_x_0 =
     match find_upper_bound_exn sup x with
@@ -646,7 +646,7 @@ struct
       { t with sup ; sup_changed }
 
   let is_constant { inf ; sup ; _ } x =
-    match MV.find x inf, MV.find x sup with
+    match find_lower_bound_exn inf x, find_upper_bound_exn sup x with
     | (inf, _), (sup, _) -> W.compare inf sup = 0
     | exception Not_found -> false
 
@@ -657,7 +657,7 @@ struct
       if W.compare k W.zero >= 0 then t else negative_cycle (path e)
     else
       let t =
-        match MV.find x t.inf with
+        match find_lower_bound_exn t.inf x with
         | (inf, inf_p) ->
           (* x - y <= k /\ 0 - x <= -inf -> 0 - y <= -(inf - k) *)
           add_lower_bound_exn
@@ -665,7 +665,7 @@ struct
         | exception Not_found -> t
       in
       let t =
-        match MV.find y t.sup with
+        match find_upper_bound_exn t.sup y with
         | (sup, sup_p) ->
           (* x - y <= k /\ y - 0 <= sup -> x - 0 <= sup + k *)
           add_upper_bound_exn
@@ -964,9 +964,6 @@ struct
                 )
               ) g s;
 
-            Log.debug (fun m ->
-                m "Improving %a to %a@." V.pp s W.pp_print new_min_s
-              );
             loop (bops.set_exn b s new_min_s elt.path)
           ) else
             loop b
@@ -1005,7 +1002,7 @@ struct
   let tighten_inf_exn ~notify ({ inf ; sup ; inf_changed ; _ } as t) =
     if SV.is_empty inf_changed then t
     else
-      let get_exn inf v = MV.find v inf
+      let get_exn inf v = find_lower_bound_exn inf v
       and set_exn inf v w p =
         let inf = set_lower_bound_exn ~sup inf v w p in
         notify v; inf
@@ -1020,7 +1017,7 @@ struct
     if SV.is_empty sup_changed then t
     else
       let get_exn sup v =
-        let (w, p) = MV.find v sup in
+        let (w, p) = find_upper_bound_exn sup v in
         (-w, p)
       and set_exn sup v w p =
         let sup = set_upper_bound_exn ~inf sup v (-w) p in
