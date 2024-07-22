@@ -102,12 +102,6 @@ jobs:
 
       - run: opam exec -- dune install -p alt-ergo --create-install-files --prefix opt/alt-ergo --relocatable
 
-      - name: WHAT THE FUCK
-        run: git describe --always --dirty --abbrev=7
-
-      - name: WHAT THE DUCK
-        run: _destdir/opt/alt-ergo/bin/alt-ergo --version
-
       - name: Upload musl artifact
         uses: actions/upload-artifact@v4
         with:
@@ -120,16 +114,3 @@ jobs:
         with:
           files: |
             _destdir/opt/alt-ergo/bin/alt-ergo
-#  lol:
-#    name: Release
-#    runs-on: ubuntu-latest
-#    needs: [ build-musl ]
-#    steps:
-#      - name: Download musl statically linked binary
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: alt-ergo-x86_64-linux-musl
-#
-#      - name: Display structure of downloaded files
-#        run: ls -R
-#
