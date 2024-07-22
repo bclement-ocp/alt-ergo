@@ -55,7 +55,7 @@ jobs:
           path: _destdir/opt/alt-ergo/bin/alt-ergo
 
       - name: Release
-        uses: sventaro/upload-release-action@v2
+        uses: svenstaro/upload-release-action@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           asset_name: alt-ergo-$tag-${{ matrix.arch }}-macos
@@ -115,7 +115,7 @@ jobs:
           path: _destdir/opt/alt-ergo/bin/alt-ergo
 
       - name: Release
-        uses: sventaro/upload-release-action@v2
+        uses: svenstaro/upload-release-action@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           asset_name: alt-ergo-$tag-x86_64-linux-musl
