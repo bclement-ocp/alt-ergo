@@ -24,6 +24,9 @@ jobs:
           - arch: aarch64
             os: macos-14
 
+    permissions:
+      contents: write
+
     runs-on: ${{ matrix.os }}
 
     steps:
