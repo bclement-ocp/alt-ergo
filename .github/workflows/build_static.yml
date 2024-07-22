@@ -82,19 +82,28 @@ jobs:
       # the ocaml user do not have rights on it.
       - run: CURRENTDIR=$(basename $(pwd)); git config --global --add safe.directory /__w/$CURRENTDIR/$CURRENTDIR
 
-      - name: Install static dependencies
-        run: sudo apk add zlib-static
+      # - name: Install static dependencies
+      #   run: sudo apk add zlib-static
 
-      - run: opam switch create . ocaml-system --locked --deps-only --ignore-constraints-on alt-ergo-lib,alt-ergo-parsers
+      # - run: opam switch create . ocaml-system --locked --deps-only --ignore-constraints-on alt-ergo-lib,alt-ergo-parsers
 
-      - run: opam exec -- dune subst
+      # - run: opam exec -- dune subst
 
-      - name: Build statically linked binary
-        run: opam exec -- dune build --release @install --promote-install-files false
-        env:
-          LINK_MODE: static
+      # - name: Build statically linked binary
+      #   run: opam exec -- dune build --release @install --promote-install-files false
+      #   env:
+      #     LINK_MODE: static
 
-      - run: opam exec -- dune install -p alt-ergo --create-install-files --prefix opt/alt-ergo --relocatable
+      # - run: opam exec -- dune install -p alt-ergo --create-install-files --prefix opt/alt-ergo --relocatable
+
+      - name: WHAT THE FUCK
+        run: git describe --always --dirty --abbrev=7
+
+      - name: WHAT THE HECK
+        run: git describe --tags
+
+      - name: WHAT THE DUCK
+        run: _destdir/opt/alt-ergo/bin/alt-ergo --version
 
       - name: Upload musl artifact
         uses: actions/upload-artifact@v4
