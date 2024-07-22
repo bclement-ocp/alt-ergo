@@ -32,6 +32,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Retrieve annotated tags (https://github.com/actions/checkout/issues/290)
+        run: git fetch --tags --force
+
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 4.14.1
