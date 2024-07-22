@@ -74,6 +74,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Retrieve annotated tags (https://github.com/actions/checkout/issues/290)
+        run: git fetch --tags --force
+
+
       - name: Switch to ocaml user
         run: su ocaml
 
