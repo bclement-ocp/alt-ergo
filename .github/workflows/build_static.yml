@@ -87,7 +87,7 @@ jobs:
 
       - run: opam switch create . ocaml-system --locked --deps-only --ignore-constraints-on alt-ergo-lib,alt-ergo-parsers
 
-      # - run: opam exec -- dune subst
+      - run: opam exec -- dune subst
 
       - name: Build statically linked binary
         run: opam exec -- dune build --release @install --promote-install-files false
