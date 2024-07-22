@@ -74,10 +74,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Retrieve annotated tags (https://github.com/actions/checkout/issues/290)
-        run: git fetch --tags --force
-
-
       - name: Switch to ocaml user
         run: su ocaml
 
@@ -88,6 +84,9 @@ jobs:
       # This line is needed to allow the working directory to be used even
       # the ocaml user do not have rights on it.
       - run: CURRENTDIR=$(basename $(pwd)); git config --global --add safe.directory /__w/$CURRENTDIR/$CURRENTDIR
+
+      - name: Retrieve annotated tags (https://github.com/actions/checkout/issues/290)
+        run: git fetch --tags --force
 
       - name: Install static dependencies
         run: sudo apk add zlib-static
