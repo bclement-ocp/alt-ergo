@@ -103,7 +103,7 @@ jobs:
       #    path: _destdir/opt/alt-ergo/bin/alt-ergo
       #
       - name: Fake dummy
-        run: mkdir -p _destdir/opt/alt-ergo/bin/alt-ergo && echo 'dummy' > alt-ergo
+        run: mkdir -p _destdir/opt/alt-ergo/bin/ && echo $(git describe --tags) > _destdir/opt/alt-ergo/bin/alt-ergo
 
       - name: Release
         uses: softprops/action-gh-release@v2
