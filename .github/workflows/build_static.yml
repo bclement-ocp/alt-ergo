@@ -9,14 +9,13 @@ on:
     branches:
       - next
       - main
-      - wip-release
 
 jobs:
   build-macos-static:
     name: Build statically linked macOS binaries
     # Only do this when explicitly requested since it takes a long time to
     # build on macOS; no need to waste resources
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
     strategy:
       matrix:
         include:
@@ -54,6 +53,13 @@ jobs:
         with:
           name: alt-ergo-${{ matrix.arch }}-macos
           path: _destdir/opt/alt-ergo/bin/alt-ergo
+
+      - name: Release
+        uses: sventaro/upload-release-action@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          asset_name: alt-ergo-$tag-${{ matrix.arch }}-macos
+          file: _destdir/opt/alt-ergo/bin/alt-ergo
 
   build-musl:
     name: Build statically linked binary with musl
@@ -109,8 +115,8 @@ jobs:
           path: _destdir/opt/alt-ergo/bin/alt-ergo
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: sventaro/upload-release-action@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: |
-            _destdir/opt/alt-ergo/bin/alt-ergo
+          asset_name: alt-ergo-$tag-x86_64-linux-musl
+          file: _destdir/opt/alt-ergo/bin/alt-ergo
