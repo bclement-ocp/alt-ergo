@@ -7,9 +7,10 @@ on:
     branches:
       - next
       - main
+      - wip-release
 
 jobs:
-  macos-static:
+  build-macos-static:
     name: Build statically linked macOS binaries
     # Only do this when explicitly requested since it takes a long time to
     # build on macOS; no need to waste resources
@@ -49,7 +50,7 @@ jobs:
           name: alt-ergo-${{ matrix.arch }}-macos
           path: _destdir/opt/alt-ergo/bin/alt-ergo
 
-  musl:
+  build-musl:
     name: Build statically linked binary with musl
 
     runs-on: ubuntu-latest
@@ -94,3 +95,15 @@ jobs:
         with:
           name: alt-ergo-x86_64-linux-musl
           path: _destdir/opt/alt-ergo/bin/alt-ergo
+
+  lol:
+    name: Release
+    needs: [ musl ]
+    steps:
+      - name: Download musl statically linked binary
+        uses: actions/download-artifact@v4
+        with:
+          name: alt-ergo-x86_64-linux-musl
+
+      - name: Display structure of downloaded files
+        run: ls -R
