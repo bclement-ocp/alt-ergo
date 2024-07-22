@@ -96,15 +96,6 @@ jobs:
 
       - run: opam exec -- dune install -p alt-ergo --create-install-files --prefix opt/alt-ergo --relocatable
 
-      - name: WHAT THE FUCK
-        run: git describe --always --dirty --abbrev=7
-
-      - name: WHAT THE HECK
-        run: git describe --tags
-
-      - name: WHAT THE DUCK
-        run: _destdir/opt/alt-ergo/bin/alt-ergo --version
-
       - name: Upload musl artifact
         uses: actions/upload-artifact@v4
         with:
