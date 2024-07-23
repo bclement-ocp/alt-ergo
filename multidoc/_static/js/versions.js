@@ -11,7 +11,7 @@ function renderVersions(versions) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-  $.getJSON('_static/versions.json', (active) => {
+  $.getJSON('/alt-ergo/versions.json', (active) => {
     const versions = {
       "active": active,
       "current": JSON.parse(document.getElementById('CURRENT_VERSION').innerHTML),
