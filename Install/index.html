@@ -1,12 +1,15 @@
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en">
 <head>
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Installation &mdash; Alt-Ergo Documentation  documentation</title>
-      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=19f00094" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/versions.css?v=21adeb6f" />
+
+  
   <!--[if lt IE 9]>
     <script src="../_static/js/html5shiv.min.js"></script>
   <![endif]-->
@@ -16,6 +19,7 @@
         <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=b3ba4146"></script>
         <script src="../_static/doctools.js?v=888ff710"></script>
         <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
+        <script src="../_static/js/versions.js?v=e4a5d295"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -108,14 +112,14 @@
 <section id="from-a-package-manager">
 <h2>From a package manager<a class="headerlink" href="#from-a-package-manager" title="Permalink to this heading"></a></h2>
 <p>Alt-ergo is available on <a class="reference external" href="https://opam.ocaml.org/">opam</a>, the ocaml package manager with the following command :</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">opam</span> <span class="n">install</span> <span class="n">alt</span><span class="o">-</span><span class="n">ergo</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="n">opam</span> <span class="n">install</span> <span class="n">alt</span><span class="o">-</span><span class="n">ergo</span>
 </pre></div>
 </div>
 <p>This two command will install the Alt-ergo library <code class="docutils literal notranslate"><span class="pre">alt-ergo-lib</span></code> and the parsers <code class="docutils literal notranslate"><span class="pre">alt-ergo-parsers</span></code>, as well as other librairies detailled in <a class="reference internal" href="#dependencies">dependencies</a>.</p>
 <section id="on-debian">
 <h3>On Debian<a class="headerlink" href="#on-debian" title="Permalink to this heading"></a></h3>
 <p>Alt-ergo is also available in the debian package manager <a class="reference external" href="https://packages.debian.org/buster/alt-ergo">here</a>. You can install it with the following command :</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sudo</span> <span class="n">apt</span> <span class="n">install</span> <span class="n">alt</span><span class="o">-</span><span class="n">ergo</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="n">sudo</span> <span class="n">apt</span> <span class="n">install</span> <span class="n">alt</span><span class="o">-</span><span class="n">ergo</span>
 </pre></div>
 </div>
 </section>
@@ -128,30 +132,30 @@
 <p><img alt="" src="../_images/deps.png" /></p>
 <p>To compile the sources of the library <code class="docutils literal notranslate"><span class="pre">alt-ergo-lib</span></code> and the binary <code class="docutils literal notranslate"><span class="pre">alt-ergo</span></code>, you will need the
 following libraries :</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>  <span class="n">ocaml</span> <span class="o">&gt;=</span> <span class="mf">4.08.0</span>
-  <span class="n">dune</span> <span class="o">&gt;=</span> <span class="mf">3.0</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span>  <span class="n">ocaml</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="o">.</span><span class="mi">08</span><span class="o">.</span><span class="mi">0</span>
+  <span class="n">dune</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="o">.</span><span class="mi">0</span>
   <span class="n">dune</span><span class="o">-</span><span class="n">build</span><span class="o">-</span><span class="n">info</span>
-  <span class="n">dolmen</span> <span class="o">&gt;=</span> <span class="mf">0.9</span>
-  <span class="n">dolmen_loop</span> <span class="o">&gt;=</span> <span class="mf">0.9</span>
-  <span class="n">ocplib</span><span class="o">-</span><span class="n">simplex</span> <span class="o">&gt;=</span> <span class="mf">0.5</span>
-  <span class="n">zarith</span> <span class="o">&gt;=</span> <span class="mf">1.4</span>
+  <span class="n">dolmen</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="o">.</span><span class="mi">9</span>
+  <span class="n">dolmen_loop</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="o">.</span><span class="mi">9</span>
+  <span class="n">ocplib</span><span class="o">-</span><span class="n">simplex</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="o">.</span><span class="mi">5</span>
+  <span class="n">zarith</span> <span class="o">&gt;=</span> <span class="mi">1</span><span class="o">.</span><span class="mi">4</span>
   <span class="n">seq</span>
   <span class="n">fmt</span>
   <span class="n">ppx_blob</span>
-  <span class="n">camlzip</span> <span class="o">&gt;=</span> <span class="mf">1.07</span>
+  <span class="n">camlzip</span> <span class="o">&gt;=</span> <span class="mi">1</span><span class="o">.</span><span class="mi">07</span>
   <span class="n">menhir</span>
   <span class="n">dune</span><span class="o">-</span><span class="n">site</span>
   <span class="n">cmdliner</span>
-  <span class="n">psmt2</span><span class="o">-</span><span class="n">frontend</span> <span class="o">&gt;=</span> <span class="mf">0.4</span>
+  <span class="n">psmt2</span><span class="o">-</span><span class="n">frontend</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="o">.</span><span class="mi">4</span>
   <span class="n">stdlib</span><span class="o">-</span><span class="n">shims</span>
 </pre></div>
 </div>
 <p>You can install dependencies using:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ make deps
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">make</span> <span class="n">deps</span>
 </pre></div>
 </div>
 <p>and create a development switch with:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ make dev-switch
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">make</span> <span class="n">dev</span><span class="o">-</span><span class="n">switch</span>
 </pre></div>
 </div>
 </section>
@@ -192,14 +196,14 @@ depending on whether ocamlopt is installed or only ocamlc is detected.</p>
 <section id="alt-ergo-with-nodejs">
 <h4>Alt-Ergo with Nodejs<a class="headerlink" href="#alt-ergo-with-nodejs" title="Permalink to this heading"></a></h4>
 <p>You can install dependencies using:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ make js-deps
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="err">$</span> <span class="n">make</span> <span class="n">js</span><span class="o">-</span><span class="n">deps</span>
 </pre></div>
 </div>
 <ol class="arabic simple">
 <li><p>Compile with <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">js-node</span></code></p></li>
 </ol>
 <p>For this build rule you will need the following aditional libraries :</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">js_of_ocaml</span> <span class="n">between</span> <span class="mf">4.0.1</span> <span class="ow">and</span> <span class="mf">5.0.1</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="n">js_of_ocaml</span> <span class="n">between</span> <span class="mi">4</span><span class="o">.</span><span class="mi">0</span><span class="o">.</span><span class="mi">1</span> <span class="ow">and</span> <span class="mi">5</span><span class="o">.</span><span class="mi">0</span><span class="o">.</span><span class="mi">1</span>
 <span class="n">zarith_stubs_js</span>
 </pre></div>
 </div>
@@ -210,7 +214,7 @@ depending on whether ocamlopt is installed or only ocamlc is detected.</p>
 <li><p>Compile with <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">js-worker</span></code></p></li>
 </ol>
 <p>For this build rule you will need the following aditional libraries :</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">js_of_ocaml</span> <span class="n">between</span> <span class="mf">4.0.1</span> <span class="ow">and</span> <span class="mf">5.0.1</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="n">js_of_ocaml</span> <span class="n">between</span> <span class="mi">4</span><span class="o">.</span><span class="mi">0</span><span class="o">.</span><span class="mi">1</span> <span class="ow">and</span> <span class="mi">5</span><span class="o">.</span><span class="mi">0</span><span class="o">.</span><span class="mi">1</span>
 <span class="n">js_of_ocaml</span><span class="o">-</span><span class="n">lwt</span>
 <span class="n">zarith_stubs_js</span>
 <span class="n">data</span><span class="o">-</span><span class="n">encoding</span>
@@ -224,7 +228,7 @@ depending on whether ocamlopt is installed or only ocamlc is detected.</p>
 </ol>
 <p>This command create a <code class="docutils literal notranslate"><span class="pre">www/</span></code> directory in which you can find a small js example running in the <code class="docutils literal notranslate"><span class="pre">index.html</span></code> file</p>
 <p>For this build rule you will need the following aditional libraries :</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">js_of_ocaml</span> <span class="n">between</span> <span class="mf">4.0.1</span> <span class="ow">and</span> <span class="mf">5.0.1</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="n">js_of_ocaml</span> <span class="n">between</span> <span class="mi">4</span><span class="o">.</span><span class="mi">0</span><span class="o">.</span><span class="mi">1</span> <span class="ow">and</span> <span class="mi">5</span><span class="o">.</span><span class="mi">0</span><span class="o">.</span><span class="mi">1</span>
 <span class="n">js_of_ocaml</span><span class="o">-</span><span class="n">lwt</span>
 <span class="n">js_of_ocaml</span><span class="o">-</span><span class="n">ppx</span>
 <span class="n">lwt_ppx</span>
@@ -291,7 +295,7 @@ at the same time as the alt-ergo binary.</p></li>
       </div>
     </section>
   </div>
-  <script>
+  <script type="application/json" id="CURRENT_VERSION">{"slug": "dev"}</script><script>
       jQuery(function () {
           SphinxRtdTheme.Navigation.enable(true);
       });

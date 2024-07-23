@@ -27,12 +27,19 @@ See the [Input section] for more information about the format of the input files
 
 The `--frontend` option lets you select the frontend used to parse and type the input file. Since version 2.5.0,
 Alt-Ergo integrates two frontends:
-- The `legacy` frontend is the historical frontend of Alt-Ergo supporting the native language
-  and (partially) supporting the SMT-LIB language. The legacy frontend is currently the default.
-- The `dolmen` frontend is a new frontend using the [Dolmen library](https://github.com/Gbury/dolmen).
-  The native and SMT-LIB languages are both supported by this frontend.
-  You can select it with the `--frontend dolmen` option, which is planned to become the
-  default in a future release.
+- The `dolmen` frontend is the default frontend, powered by the
+  [Dolmen](https://github.com/Gbury/dolmen) library.  The native and SMT-LIB
+  languages are both supported by this frontend.
+- The `legacy` frontend is the historical frontend of Alt-Ergo supporting the
+  native language. You can select it with the `--frontend legacy` option. The
+  legacy frontend is deprecated, and will be removed in a future release.
+
+```{admonition} Note
+
+The `legacy` frontend has limited support for the SMT-LIB language, but many
+SMT-LIB features will not work with the `legacy` frontend. Use the (default)
+`dolmen` frontend for SMT-LIB inputs.
+```
 
 ### Generating models
 Alt-Ergo can generates best-effort models in the case it cannot conclude the unsatisfiability of
@@ -51,8 +58,7 @@ Model generation is disabled by default. There are two recommended ways to enabl
   on demand using the statement `(get-model)`.
 
   Alternatively, you can enable model generation using the statement
-  `(set-option :produce-models true)`. This currently requires using the options
-  `--sat-solver tableaux` and `--frontend dolmen`.
+  `(set-option :produce-models true)`.
 
 #### Examples
 
@@ -142,7 +148,7 @@ Model generation is disabled by default. There are two recommended ways to enabl
    (get-model)
 
   ```
-  and the command `alt-ergo --frontend dolmen --sat-solver tableaux INPUT.smt2` produces
+  and the command `alt-ergo INPUT.smt2` produces
   the output model
   ```
   unknown
@@ -151,13 +157,6 @@ Model generation is disabled by default. There are two recommended ways to enabl
     (define-fun b () Int 0)
     (define-fun c () Int 0)
   )
-  ```
-
-  ```{admonition} Note
-  You need to select the Dolmen frontend and the SAT solver Tableaux as the
-  model generation is not supported yet by the other SAT solvers. The options
-  `--dump-models` and `--produce-models` select the right frontend and SAT solver
-  for you.
   ```
 
   - As a more didactic example, let us imagine while checking the loop invariant
@@ -179,7 +178,7 @@ Model generation is disabled by default. There are two recommended ways to enabl
   ```
   Execute the command
   ```sh
-  alt-ergo --frontend dolmen --produce-models INPUT.smt2
+  alt-ergo --produce-models INPUT.smt2
   ```
   We got the output
   ```
@@ -239,16 +238,12 @@ See the [AB-Why3 README] file for the documentation of the AB-Why3 plugin
 
 The Fm-Simplex plugin can be used as follows:
 
-        $ alt-ergo --inequalities-plugin fm-simplex-plugin.cmxs [other-options] file.<ext>
-        $ alt-ergo --inequalities-plugin some-path/fm-simplex-plugin.cmxs [other-options] file.<ext>
+        $ alt-ergo --inequalities-plugin fm-simplex [other-options] file.<ext>
 
-   Alt-Ergo will try to load a local plugin called
-   "fm-simplex-plugin.cmxs". If this fails, Alt-Ergo tries to load it
-   from the default plugins directory (run `alt-ergo --where plugins`
-   to see its absolute path). You can also provide a relative or an
-   absolute path as shown by the second command above. Also, you
-   should replace ".cmxs" by ".cma" if you are working with bytcode
-   binaries.
+The `fm-simplex` inequality plugin comes built-in with Alt-Ergo and no further
+installation is required. External inequality plugins are supported through the
+[Dune-site plugins] mechanism; developers of these plugins must register them
+in the `(alt-ergo plugins)`.
 
 ### Preludes
 
@@ -340,3 +335,4 @@ A small example of how to use the Alt-Ergo web worker can be build with the comm
 [API documentation]: ../API/index.md
 [AB-Why3 README]: ../Plugins/ab_why3.md
 [Input section]: ../Input_file_formats/index
+[Dune-site plugins]: https://dune.readthedocs.io/en/stable/sites.html#plugins

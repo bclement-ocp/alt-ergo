@@ -1,12 +1,15 @@
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en">
 <head>
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Built-in types &mdash; Alt-Ergo Documentation  documentation</title>
-      <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=19f00094" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/versions.css?v=21adeb6f" />
+
+  
   <!--[if lt IE 9]>
     <script src="../../../_static/js/html5shiv.min.js"></script>
   <![endif]-->
@@ -16,6 +19,7 @@
         <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js?v=b3ba4146"></script>
         <script src="../../../_static/doctools.js?v=888ff710"></script>
         <script src="../../../_static/sphinx_highlight.js?v=4825356b"></script>
+        <script src="../../../_static/js/versions.js?v=e4a5d295"></script>
     <script src="../../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
     <link rel="search" title="Search" href="../../../search.html" />
@@ -226,18 +230,18 @@ Note that a <code class="docutils literal notranslate"><span class="pre">predica
 </section>
 <section id="examples">
 <h3>Examples<a class="headerlink" href="#examples" title="Permalink to this heading"></a></h3>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">Correct</span> <span class="n">example</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">A</span><span class="p">,</span><span class="n">B</span><span class="p">,</span><span class="n">C</span><span class="p">:</span> <span class="n">prop</span>
-<span class="n">axiom</span> <span class="n">a1</span><span class="p">:</span> <span class="n">A</span> <span class="o">-&gt;</span> <span class="n">B</span>
-<span class="n">axiom</span> <span class="n">a2</span><span class="p">:</span> <span class="n">B</span> <span class="o">-&gt;</span> <span class="n">C</span>
-<span class="n">goal</span> <span class="n">g</span><span class="p">:</span> <span class="p">(</span><span class="n">B</span><span class="o">-&gt;</span><span class="n">A</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">C</span><span class="o">-&gt;</span><span class="n">B</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">(</span><span class="n">A</span> <span class="o">&lt;-&gt;</span> <span class="n">C</span><span class="p">)</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* Correct example *)</span>
+<span class="k">logic</span> <span class="n">A</span><span class="o">,</span><span class="n">B</span><span class="o">,</span><span class="n">C</span><span class="o">:</span> <span class="k">prop</span>
+<span class="k">axiom</span> <span class="n">a1</span><span class="o">:</span> <span class="n">A</span> <span class="o">-&gt;</span> <span class="n">B</span>
+<span class="k">axiom</span> <span class="n">a2</span><span class="o">:</span> <span class="n">B</span> <span class="o">-&gt;</span> <span class="n">C</span>
+<span class="k">goal</span> <span class="n">g</span><span class="o">:</span> <span class="o">(</span><span class="n">B</span><span class="o">-&gt;</span><span class="n">A</span><span class="o">)</span> <span class="ow">and</span> <span class="o">(</span><span class="n">C</span><span class="o">-&gt;</span><span class="n">B</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">(</span><span class="n">A</span> <span class="o">&lt;-&gt;</span> <span class="n">C</span><span class="o">)</span>
 </pre></div>
 </div>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">Equivalent</span> <span class="n">example</span> <span class="n">using</span> <span class="nb">bool</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">A</span><span class="p">,</span><span class="n">B</span><span class="p">,</span><span class="n">C</span><span class="p">:</span> <span class="nb">bool</span>
-<span class="n">axiom</span> <span class="n">a1</span><span class="p">:</span> <span class="n">A</span> <span class="o">-&gt;</span> <span class="n">B</span>
-<span class="n">axiom</span> <span class="n">a2</span><span class="p">:</span> <span class="n">B</span> <span class="o">-&gt;</span> <span class="n">C</span>
-<span class="n">goal</span> <span class="n">g</span><span class="p">:</span> <span class="p">(</span><span class="n">B</span><span class="o">-&gt;</span><span class="n">A</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">C</span><span class="o">-&gt;</span><span class="n">B</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">(</span><span class="n">A</span> <span class="o">&lt;-&gt;</span> <span class="n">C</span><span class="p">)</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* Equivalent example using bool *)</span>
+<span class="k">logic</span> <span class="n">A</span><span class="o">,</span><span class="n">B</span><span class="o">,</span><span class="n">C</span><span class="o">:</span> <span class="kt">bool</span>
+<span class="k">axiom</span> <span class="n">a1</span><span class="o">:</span> <span class="n">A</span> <span class="o">-&gt;</span> <span class="n">B</span>
+<span class="k">axiom</span> <span class="n">a2</span><span class="o">:</span> <span class="n">B</span> <span class="o">-&gt;</span> <span class="n">C</span>
+<span class="k">goal</span> <span class="n">g</span><span class="o">:</span> <span class="o">(</span><span class="n">B</span><span class="o">-&gt;</span><span class="n">A</span><span class="o">)</span> <span class="ow">and</span> <span class="o">(</span><span class="n">C</span><span class="o">-&gt;</span><span class="n">B</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">(</span><span class="n">A</span> <span class="o">&lt;-&gt;</span> <span class="n">C</span><span class="o">)</span>
 </pre></div>
 </div>
 </section>
@@ -354,9 +358,9 @@ Note that a <code class="docutils literal notranslate"><span class="pre">predica
 </table>
 <p>Note that binary comparisons operators can be chained: if <code class="docutils literal notranslate"><span class="pre">op1</span></code>, <code class="docutils literal notranslate"><span class="pre">op2</span></code>, … are binary comparisons operators, than <code class="docutils literal notranslate"><span class="pre">x0</span> <span class="pre">op1</span> <span class="pre">x1</span> <span class="pre">op2</span> <span class="pre">x2</span> <span class="pre">...</span></code> has the same semantic as <code class="docutils literal notranslate"><span class="pre">(x0</span> <span class="pre">op1</span> <span class="pre">x1)</span> <span class="pre">and</span> <span class="pre">(x1</span> <span class="pre">op2</span> <span class="pre">x2)</span> <span class="pre">and</span> <span class="pre">...</span></code>.</p>
 <p>One use of this is the creation of intervals, as in the following example.</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">Linear</span> <span class="n">arithmetic</span> <span class="n">over</span> <span class="n">integers</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">goal</span> <span class="n">g</span><span class="p">:</span>
-    <span class="n">forall</span> <span class="n">x</span><span class="p">,</span><span class="n">y</span><span class="p">,</span><span class="n">z</span><span class="p">,</span><span class="n">t</span><span class="p">:</span><span class="nb">int</span><span class="o">.</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* Linear arithmetic over integers *)</span>
+<span class="k">goal</span> <span class="n">g</span><span class="o">:</span>
+    <span class="k">forall</span> <span class="n">x</span><span class="o">,</span><span class="n">y</span><span class="o">,</span><span class="n">z</span><span class="o">,</span><span class="n">t</span><span class="o">:</span><span class="kt">int</span><span class="o">.</span>
     <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">y</span> <span class="o">+</span> <span class="n">z</span> <span class="o">&lt;=</span> <span class="mi">1</span>  <span class="o">-&gt;</span>
     <span class="n">x</span> <span class="o">+</span> <span class="n">t</span> <span class="o">+</span> <span class="n">y</span> <span class="o">+</span> <span class="n">z</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-&gt;</span>
     <span class="n">y</span> <span class="o">+</span> <span class="n">z</span> <span class="o">&lt;&gt;</span> <span class="mi">0</span> <span class="o">-&gt;</span>
@@ -371,28 +375,28 @@ along with some limited reasoning support, typically restricted to constants.
 These primitives are only available in the native input format.</p>
 <section id="conversion-between-integers-and-reals">
 <h3>Conversion between integers and reals<a class="headerlink" href="#conversion-between-integers-and-reals" title="Permalink to this heading"></a></h3>
-<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span>logic real_of_int : int -&gt; real
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="k">logic</span> <span class="n">real_of_int</span> <span class="o">:</span> <span class="kt">int</span> <span class="o">-&gt;</span> <span class="kt">real</span>
 </pre></div>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">real_of_int</span></code> converts an integer into its representation as a real number.</p>
-<p><em>Note</em>: When using the <code class="docutils literal notranslate"><span class="pre">dolmen</span></code> frontend, <code class="docutils literal notranslate"><span class="pre">real_of_int</span></code> is also available in
-the smtlib2 format as the <code class="docutils literal notranslate"><span class="pre">to_real</span></code> function from the <code class="docutils literal notranslate"><span class="pre">Reals_Ints</span></code> theory.</p>
-<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span>logic int_floor : real -&gt; int
-logic int_ceil : real -&gt; int
-logic real_is_int : real -&gt; bool
+<p><em>Note</em>: <code class="docutils literal notranslate"><span class="pre">real_of_int</span></code> is also available in the smtlib2 format as the <code class="docutils literal notranslate"><span class="pre">to_real</span></code>
+function from the <code class="docutils literal notranslate"><span class="pre">Reals_Ints</span></code> theory.</p>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="k">logic</span> <span class="n">int_floor</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">int</span>
+<span class="k">logic</span> <span class="n">int_ceil</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">int</span>
+<span class="k">logic</span> <span class="n">real_is_int</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">bool</span>
 </pre></div>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">int_floor</span></code> and <code class="docutils literal notranslate"><span class="pre">int_ceil</span></code> implement the usual <code class="docutils literal notranslate"><span class="pre">floor</span></code> and <code class="docutils literal notranslate"><span class="pre">ceil</span></code> functions.
 They compute the greatest integer less than a real and the least integer
 greater than a real, respectively.</p>
 <p><code class="docutils literal notranslate"><span class="pre">real_is_int</span></code> is true for reals that are exact integers, and false otherwise.</p>
-<p><em>Note</em>: When using the Dolmen frontend, <code class="docutils literal notranslate"><span class="pre">int_floor</span></code> and <code class="docutils literal notranslate"><span class="pre">real_is_int</span></code> are
-also available in the smtlib2 format as the <code class="docutils literal notranslate"><span class="pre">to_int</span></code> and <code class="docutils literal notranslate"><span class="pre">is_int</span></code> functions
-from the <code class="docutils literal notranslate"><span class="pre">Reals_Ints</span></code> theory respectively.</p>
+<p><em>Note</em>: <code class="docutils literal notranslate"><span class="pre">int_floor</span></code> and <code class="docutils literal notranslate"><span class="pre">real_is_int</span></code> are also available in the smtlib2 format
+as the <code class="docutils literal notranslate"><span class="pre">to_int</span></code> and <code class="docutils literal notranslate"><span class="pre">is_int</span></code> functions from the <code class="docutils literal notranslate"><span class="pre">Reals_Ints</span></code> theory
+respectively.</p>
 </section>
 <section id="square-root">
 <h3>Square root<a class="headerlink" href="#square-root" title="Permalink to this heading"></a></h3>
-<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span>logic sqrt_real : real -&gt; real
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="k">logic</span> <span class="n">sqrt_real</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">real</span>
 </pre></div>
 </div>
 <p>The <code class="docutils literal notranslate"><span class="pre">sqrt_real</span></code> function denotes the square root of a real number.</p>
@@ -408,14 +412,14 @@ functions were introduced prior to <code class="docutils literal notranslate"><s
 Alt-Ergo. They are preserved due to being used internally for floating-point
 reasoning, but should not be used outside of the solver. Prefer defining these
 functions using <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">..</span> <span class="pre">then</span> <span class="pre">..</span> <span class="pre">else</span> <span class="pre">..</span></code> instead.</p>
-<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span>logic abs_real : real -&gt; real
-logic abs_int : int -&gt; int
-logic max_real : real, real -&gt; real
-logic max_int : int, int -&gt; int
-logic min_int : int, int -&gt; int
-logic sqrt_real_default : real -&gt; real
-logic sqrt_real_excess : real -&gt; real
-logic integer_log2 : real -&gt; int
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="k">logic</span> <span class="n">abs_real</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">real</span>
+<span class="k">logic</span> <span class="n">abs_int</span> <span class="o">:</span> <span class="kt">int</span> <span class="o">-&gt;</span> <span class="kt">int</span>
+<span class="k">logic</span> <span class="n">max_real</span> <span class="o">:</span> <span class="kt">real</span><span class="o">,</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">real</span>
+<span class="k">logic</span> <span class="n">max_int</span> <span class="o">:</span> <span class="kt">int</span><span class="o">,</span> <span class="kt">int</span> <span class="o">-&gt;</span> <span class="kt">int</span>
+<span class="k">logic</span> <span class="n">min_int</span> <span class="o">:</span> <span class="kt">int</span><span class="o">,</span> <span class="kt">int</span> <span class="o">-&gt;</span> <span class="kt">int</span>
+<span class="k">logic</span> <span class="n">sqrt_real_default</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">real</span>
+<span class="k">logic</span> <span class="n">sqrt_real_excess</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">real</span>
+<span class="k">logic</span> <span class="n">integer_log2</span> <span class="o">:</span> <span class="kt">real</span> <span class="o">-&gt;</span> <span class="kt">int</span>
 </pre></div>
 </div>
 </section>
@@ -453,35 +457,35 @@ logic integer_log2 : real -&gt; int
 </table>
 <section id="id3">
 <h3>Examples<a class="headerlink" href="#id3" title="Permalink to this heading"></a></h3>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">**</span> <span class="n">Usage</span> <span class="n">of</span> <span class="n">bitv</span> <span class="n">types</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">register</span><span class="p">:</span> <span class="n">bitv</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(** Usage of bitv types *)</span>
+<span class="k">logic</span> <span class="n">register</span><span class="o">:</span> <span class="k">bitv</span><span class="o">[</span><span class="mi">8</span><span class="o">]</span>
 
-<span class="p">(</span><span class="o">**</span> <span class="n">Explicit</span> <span class="n">declaration</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">axiom</span> <span class="n">a</span><span class="p">:</span> <span class="n">register</span> <span class="o">=</span> <span class="p">[</span><span class="o">|</span><span class="mi">00101010</span><span class="o">|</span><span class="p">]</span>
+<span class="c">(** Explicit declaration *)</span>
+<span class="k">axiom</span> <span class="n">a</span><span class="o">:</span> <span class="n">register</span> <span class="o">=</span> <span class="o">[</span><span class="err">|</span><span class="mi">00101010</span><span class="err">|</span><span class="o">]</span>
 
-<span class="p">(</span><span class="o">**</span> <span class="n">Concatenation</span> 
-        <span class="n">Both</span> <span class="n">goals</span> <span class="n">are</span> <span class="n">valid</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">goal</span> <span class="n">g1</span><span class="p">:</span>
-    <span class="n">forall</span> <span class="n">x</span><span class="p">,</span><span class="n">y</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">16</span><span class="p">]</span><span class="o">.</span> <span class="n">x</span><span class="nd">@y</span><span class="o">=</span><span class="n">y</span><span class="nd">@x</span> <span class="o">-&gt;</span> <span class="n">x</span> <span class="o">=</span> <span class="n">y</span>
+<span class="c">(** Concatenation </span>
+<span class="c">        Both goals are valid *)</span>
+<span class="k">goal</span> <span class="n">g1</span><span class="o">:</span>
+    <span class="k">forall</span> <span class="n">x</span><span class="o">,</span><span class="n">y</span><span class="o">:</span><span class="k">bitv</span><span class="o">[</span><span class="mi">16</span><span class="o">].</span> <span class="n">x</span><span class="o">@</span><span class="n">y</span><span class="o">=</span><span class="n">y</span><span class="o">@</span><span class="n">x</span> <span class="o">-&gt;</span> <span class="n">x</span> <span class="o">=</span> <span class="n">y</span>
 
-<span class="n">goal</span> <span class="n">g2</span><span class="p">:</span>
-    <span class="n">forall</span> <span class="n">x</span><span class="p">,</span><span class="n">y</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="o">.</span> <span class="n">x</span><span class="o">@</span><span class="p">[</span><span class="o">|</span><span class="mi">101</span><span class="o">|</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="o">|</span><span class="mi">000101</span><span class="o">|</span><span class="p">]</span> <span class="o">-&gt;</span> <span class="n">x</span><span class="o">=</span><span class="p">[</span><span class="o">|</span><span class="mi">000</span><span class="o">|</span><span class="p">]</span>
+<span class="k">goal</span> <span class="n">g2</span><span class="o">:</span>
+    <span class="k">forall</span> <span class="n">x</span><span class="o">,</span><span class="n">y</span><span class="o">:</span><span class="k">bitv</span><span class="o">[</span><span class="mi">3</span><span class="o">].</span> <span class="n">x</span><span class="o">@[</span><span class="err">|</span><span class="mi">101</span><span class="err">|</span><span class="o">]</span> <span class="o">=</span> <span class="o">[</span><span class="err">|</span><span class="mi">000101</span><span class="err">|</span><span class="o">]</span> <span class="o">-&gt;</span> <span class="n">x</span><span class="o">=[</span><span class="err">|</span><span class="mi">000</span><span class="err">|</span><span class="o">]</span>
     
-<span class="p">(</span><span class="o">**</span> <span class="n">Extraction</span> <span class="n">of</span> <span class="n">contiguous</span> <span class="n">bits</span> <span class="o">*</span>
-        <span class="n">All</span> <span class="n">goals</span> <span class="n">are</span> <span class="n">valid</span><span class="p">)</span>
-<span class="n">goal</span> <span class="n">g3</span><span class="p">:</span>
-    <span class="p">[</span><span class="o">|</span><span class="mi">010</span><span class="o">|</span><span class="p">]</span><span class="o">^</span><span class="p">{</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">}</span><span class="o">=</span><span class="p">[</span><span class="o">|</span><span class="mi">1100</span><span class="o">|</span><span class="p">]</span><span class="o">^</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">}</span>
+<span class="c">(** Extraction of contiguous bits *</span>
+<span class="c">        All goals are valid)</span>
+<span class="c">goal g3:</span>
+<span class="c">    [|010|]^{0,1}=[|1100|]^{1,2}</span>
 
-<span class="n">goal</span> <span class="n">g4</span><span class="p">:</span>
-    <span class="n">forall</span> <span class="n">x</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span> <span class="n">forall</span> <span class="n">y</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span>
-    <span class="n">x</span><span class="o">=</span><span class="n">y</span><span class="o">@</span><span class="p">[</span><span class="o">|</span><span class="mi">10</span><span class="o">|</span><span class="p">]</span> <span class="o">-&gt;</span>
-    <span class="n">x</span><span class="o">^</span><span class="p">{</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">}</span><span class="o">=</span><span class="p">[</span><span class="o">|</span><span class="mi">11</span><span class="o">|</span><span class="p">]</span> <span class="o">-&gt;</span>
-    <span class="n">x</span><span class="o">=</span><span class="p">[</span><span class="o">|</span><span class="mi">1110</span><span class="o">|</span><span class="p">]</span>
+<span class="c">goal g4:</span>
+<span class="c">    forall x:bitv[4]. forall y:bitv[2].</span>
+<span class="c">    x=y@[|10|] -&gt;</span>
+<span class="c">    x^{2,3}=[|11|] -&gt;</span>
+<span class="c">    x=[|1110|]</span>
 
-<span class="n">goal</span> <span class="n">g5</span> <span class="p">:</span> 
-    <span class="n">forall</span> <span class="n">x</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">32</span><span class="p">]</span><span class="o">.</span> <span class="n">forall</span> <span class="n">y</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">32</span><span class="p">]</span><span class="o">.</span> <span class="n">forall</span> <span class="n">s</span><span class="p">:</span><span class="n">bitv</span><span class="p">[</span><span class="mi">32</span><span class="p">]</span><span class="o">.</span> 
-    <span class="n">s</span> <span class="o">=</span> <span class="n">y</span><span class="o">^</span><span class="p">{</span><span class="mi">0</span><span class="p">,</span><span class="mi">15</span><span class="p">}</span> <span class="o">@</span> <span class="n">x</span><span class="o">^</span><span class="p">{</span><span class="mi">16</span><span class="p">,</span><span class="mi">31</span><span class="p">}</span> <span class="o">-&gt;</span>
-    <span class="p">(</span><span class="n">s</span><span class="o">^</span><span class="p">{</span><span class="mi">16</span><span class="p">,</span><span class="mi">31</span><span class="p">}</span> <span class="o">=</span> <span class="n">y</span><span class="o">^</span><span class="p">{</span><span class="mi">0</span><span class="p">,</span><span class="mi">15</span><span class="p">}</span> <span class="ow">and</span> <span class="n">s</span><span class="o">^</span><span class="p">{</span><span class="mi">0</span><span class="p">,</span><span class="mi">15</span><span class="p">}</span> <span class="o">=</span> <span class="n">x</span><span class="o">^</span><span class="p">{</span><span class="mi">16</span><span class="p">,</span><span class="mi">31</span><span class="p">})</span> 
+<span class="c">goal g5 : </span>
+<span class="c">    forall x:bitv[32]. forall y:bitv[32]. forall s:bitv[32]. </span>
+<span class="c">    s = y^{0,15} @ x^{16,31} -&gt;</span>
+<span class="c">    (s^{16,31} = y^{0,15} and s^{0,15} = x^{16,31}) </span>
 </pre></div>
 </div>
 </section>
@@ -489,23 +493,23 @@ logic integer_log2 : real -&gt; int
 <section id="id4">
 <h2>Type variables<a class="headerlink" href="#id4" title="Permalink to this heading"></a></h2>
 <p>As type variables and polymorphism have already been described, let’s just look at the following example.</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">logic</span> <span class="n">f</span><span class="p">:</span> <span class="s1">&#39;a-&gt;&#39;</span><span class="n">b</span>
-<span class="n">logic</span> <span class="n">g</span><span class="p">:</span> <span class="s1">&#39;b-&gt;&#39;</span><span class="n">b</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="k">logic</span> <span class="n">f</span><span class="o">:</span> <span class="k">&#39;</span><span class="n">a</span><span class="o">-&gt;</span><span class="k">&#39;</span><span class="n">b</span>
+<span class="k">logic</span> <span class="n">g</span><span class="o">:</span> <span class="k">&#39;</span><span class="n">b</span><span class="o">-&gt;</span><span class="k">&#39;</span><span class="n">b</span>
 
-<span class="n">axiom</span> <span class="n">a1</span><span class="p">:</span> <span class="n">forall</span> <span class="n">x</span><span class="p">:</span><span class="s1">&#39;a.  g(f(x))=f(x)</span>
-<span class="n">axiom</span> <span class="n">a2</span><span class="p">:</span> <span class="n">forall</span> <span class="n">x</span><span class="p">:</span><span class="nb">int</span><span class="o">.</span> <span class="n">f</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">=</span><span class="mi">0</span>
+<span class="k">axiom</span> <span class="n">a1</span><span class="o">:</span> <span class="k">forall</span> <span class="n">x</span><span class="o">:</span><span class="k">&#39;</span><span class="n">a</span><span class="o">.</span>  <span class="n">g</span><span class="o">(</span><span class="n">f</span><span class="o">(</span><span class="n">x</span><span class="o">))=</span><span class="n">f</span><span class="o">(</span><span class="n">x</span><span class="o">)</span>
+<span class="k">axiom</span> <span class="n">a2</span><span class="o">:</span> <span class="k">forall</span> <span class="n">x</span><span class="o">:</span><span class="kt">int</span><span class="o">.</span> <span class="n">f</span><span class="o">(</span><span class="n">x</span><span class="o">)=</span><span class="mi">0</span>
 
-<span class="n">goal</span> <span class="n">g1</span><span class="p">:</span> 
-   <span class="p">(</span><span class="o">*</span> <span class="n">Valid</span> <span class="o">*</span><span class="p">)</span>
-   <span class="n">g</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mf">0.01</span><span class="p">))</span> <span class="o">=</span> <span class="n">f</span><span class="p">(</span><span class="mf">0.01</span><span class="p">)</span>
+<span class="k">goal</span> <span class="n">g1</span><span class="o">:</span> 
+   <span class="c">(* Valid *)</span>
+   <span class="n">g</span><span class="o">(</span><span class="n">f</span><span class="o">(</span><span class="mi">0</span><span class="o">.</span><span class="mi">01</span><span class="o">))</span> <span class="o">=</span> <span class="n">f</span><span class="o">(</span><span class="mi">0</span><span class="o">.</span><span class="mi">01</span><span class="o">)</span>
 
-<span class="n">goal</span> <span class="n">g2</span><span class="p">:</span> 
-   <span class="p">(</span><span class="o">*</span> <span class="n">Valid</span> <span class="o">*</span><span class="p">)</span>
-   <span class="n">g</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span> <span class="o">=</span> <span class="n">g</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="k">goal</span> <span class="n">g2</span><span class="o">:</span> 
+   <span class="c">(* Valid *)</span>
+   <span class="n">g</span><span class="o">(</span><span class="n">f</span><span class="o">(</span><span class="mi">1</span><span class="o">))</span> <span class="o">=</span> <span class="n">g</span><span class="o">(</span><span class="mi">0</span><span class="o">)</span>
 
-<span class="n">goal</span> <span class="n">g3</span><span class="p">:</span> 
-   <span class="p">(</span><span class="o">*</span> <span class="n">I</span> <span class="n">don</span><span class="s1">&#39;t know *)</span>
-   <span class="n">g</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mf">0.01</span><span class="p">))</span> <span class="o">=</span> <span class="n">g</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="k">goal</span> <span class="n">g3</span><span class="o">:</span> 
+   <span class="c">(* I don&#39;t know *)</span>
+   <span class="n">g</span><span class="o">(</span><span class="n">f</span><span class="o">(</span><span class="mi">0</span><span class="o">.</span><span class="mi">01</span><span class="o">))</span> <span class="o">=</span> <span class="n">g</span><span class="o">(</span><span class="mi">0</span><span class="o">)</span>
 </pre></div>
 </div>
 </section>
@@ -515,52 +519,52 @@ logic integer_log2 : real -&gt; int
 <p>Remember that <code class="docutils literal notranslate"><span class="pre">farray</span></code> are parametrized by two types: the type of their indexes (default is <code class="docutils literal notranslate"><span class="pre">int</span></code>) and the type of their values (no default).</p>
 <section id="syntax">
 <h3>Syntax<a class="headerlink" href="#syntax" title="Permalink to this heading"></a></h3>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">Instantiation</span> <span class="n">of</span> <span class="n">a</span> <span class="n">farray</span> <span class="nb">type</span> <span class="o">*</span><span class="p">)</span>
-<span class="o">&lt;</span><span class="n">farray_type</span><span class="o">&gt;</span>        <span class="p">:</span><span class="o">:=</span> <span class="o">&lt;</span><span class="n">value_type</span><span class="o">&gt;</span> <span class="s1">&#39;farray&#39;</span>
-                       <span class="o">|</span> <span class="s1">&#39;(&#39;</span> <span class="o">&lt;</span><span class="n">index_type</span><span class="o">&gt;</span> <span class="s1">&#39;,&#39;</span> <span class="o">&lt;</span><span class="n">value_type</span><span class="o">&gt;</span> <span class="s1">&#39;)&#39;</span> <span class="s1">&#39;farray&#39;</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* Instantiation of a farray type *)</span>
+<span class="o">&lt;</span><span class="n">farray_type</span><span class="o">&gt;</span>        <span class="o">::=</span> <span class="o">&lt;</span><span class="n">value_type</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="n">farray&#39;</span>
+                       <span class="err">|</span> <span class="k">&#39;</span><span class="o">(</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">index_type</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">,</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">value_type</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">)</span><span class="k">&#39;</span> <span class="k">&#39;</span><span class="n">farray&#39;</span>
 
-<span class="p">(</span><span class="o">*</span> <span class="n">Access</span> <span class="o">-</span> <span class="n">this</span> <span class="n">expression</span> <span class="ow">is</span> <span class="n">of</span> <span class="nb">type</span> <span class="p">(</span><span class="n">value_type</span><span class="p">)</span> <span class="o">*</span><span class="p">)</span>
-<span class="o">&lt;</span><span class="n">farray_access_expr</span><span class="o">&gt;</span> <span class="p">:</span><span class="o">:=</span> <span class="o">&lt;</span><span class="n">array_id</span><span class="o">&gt;</span> <span class="s1">&#39;[&#39;</span> <span class="o">&lt;</span><span class="n">index</span><span class="o">&gt;</span> <span class="s1">&#39;]&#39;</span>
+<span class="c">(* Access - this expression is of type (value_type) *)</span>
+<span class="o">&lt;</span><span class="n">farray_access_expr</span><span class="o">&gt;</span> <span class="o">::=</span> <span class="o">&lt;</span><span class="n">array_id</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">[</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">index</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">]</span><span class="k">&#39;</span>
 
-<span class="p">(</span><span class="o">*</span> <span class="n">Update</span> <span class="o">-</span> <span class="n">this</span> <span class="n">expression</span> <span class="ow">is</span> <span class="n">of</span> <span class="nb">type</span> <span class="p">((</span><span class="n">index_type</span><span class="p">)</span> <span class="p">(</span><span class="n">value_type</span><span class="p">)</span> <span class="n">farray</span><span class="p">)</span> <span class="o">*</span><span class="p">)</span>
-<span class="o">&lt;</span><span class="n">farray_update_expr</span><span class="o">&gt;</span> <span class="p">:</span><span class="o">:=</span> <span class="o">&lt;</span><span class="n">array_id</span><span class="o">&gt;</span> <span class="s1">&#39;[&#39;</span> <span class="o">&lt;</span><span class="n">index</span><span class="o">&gt;</span> <span class="s1">&#39;&lt;-&#39;</span> <span class="o">&lt;</span><span class="n">new_value</span><span class="o">&gt;</span> <span class="p">(</span> <span class="s1">&#39;,&#39;</span> <span class="o">&lt;</span><span class="n">index</span><span class="o">&gt;</span> <span class="s1">&#39;&lt;-&#39;</span> <span class="o">&lt;</span><span class="n">new_value</span><span class="o">&gt;</span> <span class="p">)</span><span class="o">*</span> <span class="s1">&#39;]&#39;</span>
+<span class="c">(* Update - this expression is of type ((index_type) (value_type) farray) *)</span>
+<span class="o">&lt;</span><span class="n">farray_update_expr</span><span class="o">&gt;</span> <span class="o">::=</span> <span class="o">&lt;</span><span class="n">array_id</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">[</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">index</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">&lt;-</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">new_value</span><span class="o">&gt;</span> <span class="o">(</span> <span class="k">&#39;</span><span class="o">,</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">index</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">&lt;-</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">new_value</span><span class="o">&gt;</span> <span class="o">)*</span> <span class="k">&#39;</span><span class="o">]</span><span class="k">&#39;</span>
 </pre></div>
 </div>
 </section>
 <section id="id6">
 <h3>Examples<a class="headerlink" href="#id6" title="Permalink to this heading"></a></h3>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">arr1</span> <span class="ow">is</span> <span class="n">a</span> <span class="n">general</span> <span class="n">polymorphic</span> <span class="n">farray</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">arr1</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;a, &#39;</span><span class="n">b</span><span class="p">)</span> <span class="n">farray</span>
-<span class="p">(</span><span class="o">*</span> <span class="n">arr2</span> <span class="ow">is</span> <span class="n">a</span> <span class="n">polymorphic</span> <span class="n">farray</span> <span class="n">whose</span> <span class="n">indexes</span> <span class="n">are</span> <span class="nb">int</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">arr2</span><span class="p">:</span> <span class="s1">&#39;b farray</span>
-<span class="p">(</span><span class="o">*</span> <span class="n">arr3</span> <span class="ow">is</span> <span class="n">a</span> <span class="n">farray</span> <span class="n">whose</span> <span class="n">indexes</span> <span class="n">are</span> <span class="nb">int</span> <span class="ow">and</span> <span class="n">whose</span> <span class="n">values</span> <span class="n">are</span> <span class="n">real</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">arr3</span><span class="p">:</span> <span class="n">real</span> <span class="n">farray</span>
-<span class="p">(</span><span class="o">*</span> <span class="n">arr4</span> <span class="ow">is</span> <span class="n">a</span> <span class="n">farray</span> <span class="n">whose</span> <span class="n">indexes</span> <span class="n">are</span> <span class="n">parametrized</span> <span class="n">by</span> <span class="s1">&#39;a and whose values are real *)</span>
-<span class="n">logic</span> <span class="n">arr4</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;a, real) farray</span>
-<span class="p">(</span><span class="o">*</span> <span class="n">arr5</span> <span class="ow">is</span> <span class="n">a</span> <span class="n">farray</span> <span class="n">whose</span> <span class="n">indexes</span> <span class="ow">and</span> <span class="n">values</span> <span class="n">are</span> <span class="n">real</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">logic</span> <span class="n">arr5</span><span class="p">:</span> <span class="p">(</span><span class="n">real</span><span class="p">,</span> <span class="n">real</span><span class="p">)</span> <span class="n">farray</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* arr1 is a general polymorphic farray *)</span>
+<span class="k">logic</span> <span class="n">arr1</span><span class="o">:</span> <span class="o">(</span><span class="k">&#39;</span><span class="n">a</span><span class="o">,</span> <span class="k">&#39;</span><span class="n">b</span><span class="o">)</span> <span class="n">farray</span>
+<span class="c">(* arr2 is a polymorphic farray whose indexes are int *)</span>
+<span class="k">logic</span> <span class="n">arr2</span><span class="o">:</span> <span class="k">&#39;</span><span class="n">b</span> <span class="n">farray</span>
+<span class="c">(* arr3 is a farray whose indexes are int and whose values are real *)</span>
+<span class="k">logic</span> <span class="n">arr3</span><span class="o">:</span> <span class="kt">real</span> <span class="n">farray</span>
+<span class="c">(* arr4 is a farray whose indexes are parametrized by &#39;a and whose values are real *)</span>
+<span class="k">logic</span> <span class="n">arr4</span><span class="o">:</span> <span class="o">(</span><span class="k">&#39;</span><span class="n">a</span><span class="o">,</span> <span class="kt">real</span><span class="o">)</span> <span class="n">farray</span>
+<span class="c">(* arr5 is a farray whose indexes and values are real *)</span>
+<span class="k">logic</span> <span class="n">arr5</span><span class="o">:</span> <span class="o">(</span><span class="kt">real</span><span class="o">,</span> <span class="kt">real</span><span class="o">)</span> <span class="n">farray</span>
 </pre></div>
 </div>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">Accessing</span> <span class="ow">and</span> <span class="n">updating</span> <span class="n">farrays</span> <span class="o">*</span><span class="p">)</span>
-<span class="n">goal</span> <span class="n">g1</span><span class="p">:</span>
-    <span class="n">forall</span> <span class="n">i</span><span class="p">,</span><span class="n">j</span><span class="p">,</span><span class="n">k</span><span class="p">:</span><span class="nb">int</span><span class="o">.</span>
-    <span class="n">forall</span> <span class="n">v</span><span class="p">,</span><span class="n">w</span><span class="p">:</span><span class="s1">&#39;a.</span>
-    <span class="n">forall</span> <span class="n">b</span><span class="p">:</span><span class="s1">&#39;a farray.</span>
-    <span class="n">b</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="n">j</span><span class="o">&lt;-</span><span class="n">b</span><span class="p">[</span><span class="n">i</span><span class="p">],</span><span class="n">k</span><span class="o">&lt;-</span><span class="n">w</span><span class="p">]</span> <span class="o">-&gt;</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* Accessing and updating farrays *)</span>
+<span class="k">goal</span> <span class="n">g1</span><span class="o">:</span>
+    <span class="k">forall</span> <span class="n">i</span><span class="o">,</span><span class="n">j</span><span class="o">,</span><span class="n">k</span><span class="o">:</span><span class="kt">int</span><span class="o">.</span>
+    <span class="k">forall</span> <span class="n">v</span><span class="o">,</span><span class="n">w</span><span class="o">:</span><span class="k">&#39;</span><span class="n">a</span><span class="o">.</span>
+    <span class="k">forall</span> <span class="n">b</span><span class="o">:</span><span class="k">&#39;</span><span class="n">a</span> <span class="n">farray</span><span class="o">.</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">b</span><span class="o">[</span><span class="n">j</span><span class="o">&lt;-</span><span class="n">b</span><span class="o">[</span><span class="n">i</span><span class="o">],</span><span class="n">k</span><span class="o">&lt;-</span><span class="n">w</span><span class="o">]</span> <span class="o">-&gt;</span>
     <span class="n">i</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-&gt;</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">-&gt;</span> <span class="n">k</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-&gt;</span>
-    <span class="n">b</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+    <span class="n">b</span><span class="o">[</span><span class="n">i</span><span class="o">]</span> <span class="o">=</span> <span class="n">b</span><span class="o">[</span><span class="n">j</span><span class="o">]</span>
 </pre></div>
 </div>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">*</span> <span class="n">Using</span> <span class="n">farrays</span> <span class="k">with</span> <span class="n">custom</span> <span class="n">types</span> <span class="k">for</span> <span class="n">indexes</span> <span class="ow">and</span> <span class="n">values</span> <span class="o">*</span><span class="p">)</span>
-<span class="nb">type</span> <span class="n">t</span>  <span class="o">=</span> <span class="n">A</span> <span class="o">|</span> <span class="n">B</span> <span class="o">|</span> <span class="n">C</span> <span class="o">|</span> <span class="n">D</span>
-<span class="nb">type</span> <span class="n">t2</span> <span class="o">=</span> <span class="n">E</span> <span class="o">|</span> <span class="n">F</span> <span class="o">|</span> <span class="n">G</span> <span class="o">|</span> <span class="n">H</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="c">(* Using farrays with custom types for indexes and values *)</span>
+<span class="k">type</span> <span class="n">t</span>  <span class="o">=</span> <span class="n">A</span> <span class="err">|</span> <span class="n">B</span> <span class="err">|</span> <span class="n">C</span> <span class="err">|</span> <span class="n">D</span>
+<span class="k">type</span> <span class="n">t2</span> <span class="o">=</span> <span class="n">E</span> <span class="err">|</span> <span class="n">F</span> <span class="err">|</span> <span class="n">G</span> <span class="err">|</span> <span class="n">H</span>
 
-<span class="n">goal</span> <span class="n">g2</span><span class="p">:</span>
-    <span class="n">forall</span> <span class="n">a</span> <span class="p">:</span> <span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="n">t2</span><span class="p">)</span> <span class="n">farray</span><span class="o">.</span>
-    <span class="n">a</span><span class="p">[</span><span class="n">B</span> <span class="o">&lt;-</span> <span class="n">E</span><span class="p">][</span><span class="n">A</span><span class="p">]</span> <span class="o">&lt;&gt;</span> <span class="n">E</span> <span class="o">-&gt;</span>
-    <span class="n">a</span><span class="p">[</span><span class="n">C</span> <span class="o">&lt;-</span> <span class="n">F</span><span class="p">][</span><span class="n">A</span><span class="p">]</span> <span class="o">&lt;&gt;</span> <span class="n">F</span> <span class="o">-&gt;</span>
-    <span class="n">a</span><span class="p">[</span><span class="n">D</span> <span class="o">&lt;-</span> <span class="n">G</span><span class="p">][</span><span class="n">A</span><span class="p">]</span> <span class="o">&lt;&gt;</span> <span class="n">G</span> <span class="o">-&gt;</span>
-    <span class="n">a</span><span class="p">[</span><span class="n">A</span><span class="p">]</span> <span class="o">=</span> <span class="n">H</span>
+<span class="k">goal</span> <span class="n">g2</span><span class="o">:</span>
+    <span class="k">forall</span> <span class="n">a</span> <span class="o">:</span> <span class="o">(</span><span class="n">t</span><span class="o">,</span><span class="n">t2</span><span class="o">)</span> <span class="n">farray</span><span class="o">.</span>
+    <span class="n">a</span><span class="o">[</span><span class="n">B</span> <span class="o">&lt;-</span> <span class="n">E</span><span class="o">][</span><span class="n">A</span><span class="o">]</span> <span class="o">&lt;&gt;</span> <span class="n">E</span> <span class="o">-&gt;</span>
+    <span class="n">a</span><span class="o">[</span><span class="n">C</span> <span class="o">&lt;-</span> <span class="n">F</span><span class="o">][</span><span class="n">A</span><span class="o">]</span> <span class="o">&lt;&gt;</span> <span class="n">F</span> <span class="o">-&gt;</span>
+    <span class="n">a</span><span class="o">[</span><span class="n">D</span> <span class="o">&lt;-</span> <span class="n">G</span><span class="o">][</span><span class="n">A</span><span class="o">]</span> <span class="o">&lt;&gt;</span> <span class="n">G</span> <span class="o">-&gt;</span>
+    <span class="n">a</span><span class="o">[</span><span class="n">A</span><span class="o">]</span> <span class="o">=</span> <span class="n">H</span>
 </pre></div>
 </div>
 </section>
@@ -591,7 +595,7 @@ logic integer_log2 : real -&gt; int
       </div>
     </section>
   </div>
-  <script>
+  <script type="application/json" id="CURRENT_VERSION">{"slug": "dev"}</script><script>
       jQuery(function () {
           SphinxRtdTheme.Navigation.enable(true);
       });
