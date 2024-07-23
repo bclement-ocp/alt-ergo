@@ -28,8 +28,8 @@ Install                    <Install/index>
 Usage                      <Usage/index>
 SMT-LIB language           <SMT-LIB_language/index>
 Alt-Ergo's native language <Alt_ergo_native/index>
-API documentation          <API/index>
 Model generation           <Model_generation>
+API documentation          <API/index>
 Plugins                    <Plugins/index>
 Developer's documentation  <Dev/index>
 About                      <About/index>
