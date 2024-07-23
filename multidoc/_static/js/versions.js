@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="rst-versions" data-toggle="rst-versions" role="note" aria-label="Versions">
       <span class="rst-current-version" data-toggle="rst-current-version">
         <span class="fa fa-book"> Current version</span>
-        v: ${ versions.current.slug }
+        ${ versions.current.slug }
         <span class="fa fa-caret-down"></span>
       </span>
       <div class="rst-other-versions">
