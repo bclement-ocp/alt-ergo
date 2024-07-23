@@ -1,7 +1,4 @@
-{
-  "current": {"url": "dev", "slug": "next"},
-  "active": [
-    {"url": "dev", "slug": "next"},
-    {"url": "v2.5.4", "slug": "2.5.4"}
-  ]
-}
+[
+  {"url": "/alt-ergo/next", "slug": "next"},
+  {"url": "/alt-ergo/2.5.4", "slug": "2.5.4"}
+]

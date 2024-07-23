@@ -11,8 +11,12 @@ function renderVersions(versions) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-  $.getJSON('_static/versions.json', (versions) => {
-    console.log(versions);
+  $.getJSON('_static/versions.json', (active) => {
+    const versions = {
+      "active": active,
+      "current": JSON.parse(document.getElementById('CURRENT_VERSION').innerHTML),
+    };
+
     document.body.insertAdjacentHTML("beforeend", `
     <div class="rst-versions" data-toggle="rst-versions" role="note" aria-label="Versions">
       <span class="rst-current-version" data-toggle="rst-current-version">
