@@ -50,10 +50,13 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="../Install/index.html">Install</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Usage/index.html">Usage</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../Input_file_formats/index.html">Input file formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../SMT-LIB_language/index.html">SMT-LIB language</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../Alt_ergo_native/index.html">Alt-Ergo's native language</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../Model_generation.html">Model generation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../API/index.html">API documentation</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Plugins</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="#ab-why3-plugins">AB why3 plugins</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#inequality-plugins">Inequality plugins</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#ab-why3-plugin-deprecated">AB why3 plugin (<strong>deprecated</strong>)</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="ab_why3.html">What is this plugin ?</a></li>
 <li class="toctree-l3"><a class="reference internal" href="ab_why3.html#what-this-plugin-is-not">What this plugin is not ?</a></li>
 <li class="toctree-l3"><a class="reference internal" href="ab_why3.html#how-to-use-it">How to use it ?</a></li>
@@ -91,8 +94,36 @@
              
   <section id="plugins">
 <h1>Plugins<a class="headerlink" href="#plugins" title="Permalink to this heading"></a></h1>
-<section id="ab-why3-plugins">
-<h2>AB why3 plugins<a class="headerlink" href="#ab-why3-plugins" title="Permalink to this heading"></a></h2>
+<p>Alt-Ergo releases on OPAM support dynamically loading plugins. The command
+<code class="docutils literal notranslate"><span class="pre">alt-ergo</span> <span class="pre">--where</span> <span class="pre">plugins</span></code> can be used to get the absolute path that is
+searched by default when looking for plugins.</p>
+<p>Binary releases on GitHub use static linking for portability, and hence do not
+support plugins.</p>
+<section id="inequality-plugins">
+<h2>Inequality plugins<a class="headerlink" href="#inequality-plugins" title="Permalink to this heading"></a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">fm-simplex</span></code> inequality plugin comes built-in with Alt-Ergo and no further
+installation is required. It is distributed under the same licensing conditions
+as Alt-Ergo. It can be used as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ alt-ergo --inequalities-plugin fm-simplex [other-options] file.&lt;ext&gt;
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you are a developer of an external inequality plugin, your plugin needs to
+be registered in the <code class="docutils literal notranslate"><span class="pre">(alt-ergo</span> <span class="pre">plugins)</span></code> site using
+<a class="reference external" href="https://dune.readthedocs.io/en/stable/reference/dune/plugin.html">dune-site</a>
+to be available as an option to <code class="docutils literal notranslate"><span class="pre">--inequalities-plugin</span></code>.</p>
+</div>
+</section>
+<section id="ab-why3-plugin-deprecated">
+<h2>AB why3 plugin (<strong>deprecated</strong>)<a class="headerlink" href="#ab-why3-plugin-deprecated" title="Permalink to this heading"></a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The AB Why3 plugin requires the use of the <code class="docutils literal notranslate"><span class="pre">--frontend</span> <span class="pre">legacy</span></code> option, which is
+deprecated and will be removed in the next version of Alt-Ergo.</p>
+<p>If you are using this plugin and would like it to be available in new versions
+of Alt-Ergo, please contact <a class="reference external" href="mailto:alt-ergo&#37;&#52;&#48;ocamlpro&#46;com">the Alt-Ergo developers</a>.</p>
+</div>
 <div class="toctree-wrapper compound">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="ab_why3.html">What is this plugin ?</a></li>
