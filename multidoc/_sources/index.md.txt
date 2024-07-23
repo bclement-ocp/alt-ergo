@@ -9,6 +9,8 @@ It was developed at [LRI](https://www.lri.fr), and is now improved and maintaine
 You can [try Alt-Ergo](https://alt-ergo.ocamlpro.com/try.html) online.
 You can also learn more about our partners with the [Alt-Ergo Users' Club](https://alt-ergo.ocamlpro.com/#club).
 
+If you are using Alt-Ergo as a library, see the [API documentation](API/index) (also available [on ocaml.org](https://ocaml.org/p/alt-ergo-lib/latest/doc/index.html)).
+
 ## Input file formats
 
 Alt-ergo supports different input languages:
@@ -26,8 +28,8 @@ Install                    <Install/index>
 Usage                      <Usage/index>
 SMT-LIB language           <SMT-LIB_language/index>
 Alt-Ergo's native language <Alt_ergo_native/index>
-Model generation           <Model_generation>
 API documentation          <API/index>
+Model generation           <Model_generation>
 Plugins                    <Plugins/index>
 Developer's documentation  <Dev/index>
 About                      <About/index>
