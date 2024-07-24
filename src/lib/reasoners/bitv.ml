@@ -404,13 +404,31 @@ module Shostak(X : ALIEN) = struct
       f x, ctx
     let (and+) = (and*)
 
-    let other ~neg t _sz ctx =
+    let other ~neg t sz ctx =
       let r, ctx' =
         match E.term_view t with
+        | { f = Op BVmul ; xs = [ x ; y ] ; _ } ->
+          let x, y = if E.compare y x < 0 then y, x else x, y in
+          let eqn =
+            E.Core.eq t
+              (E.BV.int2bv sz E.Ints.(E.BV.bv2nat x * E.BV.bv2nat y))
+          in
+          X.term_embed t, [eqn]
+        | { f = Op BVadd ; xs = [ x ; y ] ; _ } ->
+          let x, y = if E.compare y x < 0 then y, x else x, y in
+          let eqn =
+            E.Core.eq t
+              (E.BV.int2bv sz E.Ints.(E.BV.bv2nat x + E.BV.bv2nat y))
+          in
+          X.term_embed t, [eqn]
+        | { f = Op BVsub ; xs = [ x ; y ] ; _ } ->
+          let eqn =
+            E.Core.eq t
+              (E.BV.int2bv sz E.Ints.(E.BV.bv2nat x - E.BV.bv2nat y))
+          in
+          X.term_embed t, [eqn]
         | { f = Op (
-            BVand | BVor | BVxor
-            | BVadd | BVsub | BVmul | BVudiv | BVurem
-            | BVshl | BVlshr
+            BVand | BVor | BVxor | BVudiv | BVurem | BVshl | BVlshr
           ); _ } ->
           X.term_embed t, []
         | _ -> X.make t
