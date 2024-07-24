@@ -3169,10 +3169,14 @@ module BV = struct
     bvcomp (size2 s t) s t
 
   (* Arithmetic operations *)
-  let bvadd s t = mk_term (Op BVadd) [s; t] (type_info s)
+  let bvadd s t =
+    let xs = List.sort compare [s; t] in
+    mk_term (Op BVadd) xs (type_info s)
   let bvsub s t = mk_term (Op BVsub) [s; t] (type_info s)
   let bvneg s = bvsub (of_bigint_like s Z.zero) s
-  let bvmul s t = mk_term (Op BVmul) [s; t] (type_info s)
+  let bvmul s t =
+    let xs = List.sort compare [s; t] in
+    mk_term (Op BVmul) xs (type_info s)
   let bvudiv s t = mk_term (Op BVudiv) [s; t] (type_info s)
   let bvurem s t = mk_term (Op BVurem) [s; t] (type_info s)
   let bvsdiv s t =
