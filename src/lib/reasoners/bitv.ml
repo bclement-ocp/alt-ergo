@@ -365,6 +365,169 @@ module Shostak(X : ALIEN) = struct
       end
     | Some b -> b
 
+  let is_mine_opt = function
+    | [{ bv = Other { value = r; negated = false }; _ }] -> Some r
+    | _ -> None
+
+  let is_mine bv =
+    match is_mine_opt bv with
+    | Some r -> r
+    | None -> X.embed bv
+
+  module Ac = Ac.Make(X)
+
+  let to_ac ac_sy x y =
+    Ac.add ac_sy (y, 1) @@
+    match X.ac_extract x with
+    | Some { h ; l ; _ } when Sy.equal h ac_sy -> l
+    | _ -> [x, 1]
+
+  let const ~size:sz n =
+    is_mine [ { bv = Cte (Z.extract n 0 sz) ; sz }]
+
+  let const_like x n =
+    match X.type_info x with
+    | Tbitv sz -> const ~size:sz n
+    | _ -> invalid_arg "const_like"
+
+  let value x =
+    match embed x with
+    | [ { bv = Cte n; _ } ] -> Some n
+    | _ -> None
+
+  let bitwidth_list = function
+    | [] -> assert false
+    | (r, _) :: _ ->
+      match X.type_info r with
+      | Tbitv n -> n
+      | _ -> assert false
+
+  let logand_list l =
+    let sz = bitwidth_list l in
+    let minus_one = Z.extract Z.minus_one 0 sz in
+    let cte, vars =
+      List.fold_left (fun (cte, vars) (r, _) ->
+          match value r with
+          | Some n -> (Z.logand n cte, vars)
+          | None -> (cte, (r, 1) :: vars)
+        ) (minus_one, []) l
+    in
+    if Z.equal cte Z.zero then const ~size:sz cte
+    else
+      match vars with
+      | [] -> const ~size:sz cte
+      | _ ->
+        let vars =
+          if Z.equal cte minus_one then vars
+          else (const ~size:sz cte, 1) :: vars
+        in
+        X.ac_embed
+          { distribute = true
+          ; h = Op BVand
+          ; t = Tbitv sz
+          ; l = Ac.compact vars }
+
+  module Table = Hashtbl.Make(struct
+      type nonrec t = t
+
+      let equal = equal_abstract X.equal
+
+      let hash = hash_abstract X.hash
+    end)
+
+  let abstract_abs r =
+    match embed r with
+    | [] -> assert false
+    | { bv = Cte n ; sz } :: _ as bv ->
+      if Z.testbit n (sz - 1) then negate_abstract bv else bv
+    | { bv = (Other { negated ; _ } | Ext ({ negated ; _ }, _, _, _))
+      ; _ } :: _ as bv
+      ->
+      if negated then negate_abstract bv else bv
+
+  let add_list l =
+    let sz = bitwidth_list l in
+    let cte, vars =
+      List.fold_left (fun (cte, vars) (r, n) ->
+          match value r with
+          | Some m -> (Z.(~$n * m), vars)
+          | None -> (cte, (r, n) :: vars)
+        ) (Z.zero, []) l
+    in
+    match vars with
+    | [] -> const ~size:sz cte
+    | _ ->
+      let vars =
+        if Z.equal cte Z.zero then vars
+        else (const ~size:sz cte, 1) :: vars
+      in
+      X.ac_embed
+        { distribute = true
+        ; h = Op BVadd
+        ; t = Tbitv sz
+        ; l = Ac.compact vars }
+
+  let mul_list l =
+    let sz = bitwidth_list l in
+    let cte, vars =
+      List.fold_left (fun (cte, vars) (r, n) ->
+          match value r with
+          | Some m -> (Z.mul cte (Z.pow m n), vars)
+          | None -> (cte, (r, n) :: vars)
+        ) (Z.one, []) l
+    in
+    if Z.equal cte Z.zero then const ~size:sz Z.zero
+    else
+      match vars with
+      | [] -> const ~size:sz cte
+      | _ ->
+        let vars =
+          if Z.equal cte Z.one then vars
+          else (const ~size:sz cte, 1) :: vars
+        in
+        X.ac_embed
+          { distribute = true
+          ; h = Op BVmul
+          ; t = Tbitv sz
+          ; l = Ac.compact vars }
+
+  let logxor_list l =
+    let table = Table.create 17 in
+    let sz = bitwidth_list l in
+    let cte =
+      List.fold_left (fun cte (r, n) ->
+          if n mod 2 = 0 then cte
+          else
+            match value r with
+            | Some n -> Z.logxor n cte
+            | None ->
+              let abs_r = abstract_abs r in
+              match Table.find table abs_r with
+              | r' ->
+                assert (
+                  equal_abstract X.equal (embed r) (negate_abstract @@ embed r')
+                );
+                Table.remove table abs_r;
+                Z.logxor cte (Z.extract Z.minus_one 0 sz)
+              | exception Not_found ->
+                Table.add table abs_r r;
+                cte
+        ) Z.zero l
+    in
+    let vars = Table.fold (fun _ r l -> (r, 1) :: l) table [] in
+    match vars with
+    | [] -> const ~size:sz cte
+    | _ ->
+      let vars =
+        if Z.equal cte Z.zero then vars
+        else (const ~size:sz cte, 1) :: vars
+      in
+      X.ac_embed
+        { distribute = true
+        ; h = Op BVxor
+        ; t = Tbitv sz
+        ; l = Ac.compact vars }
+
   module Canon = struct
     type 'a view_descr =
       | Vcte of Z.t
@@ -404,14 +567,96 @@ module Shostak(X : ALIEN) = struct
       f x, ctx
     let (and+) = (and*)
 
+    let mul x y =
+      mul_list (to_ac (Op BVmul) x y)
+
+    let add x y =
+      add_list (to_ac (Op BVadd) x y)
+
+    let contains_ac r =
+      List.exists (fun r -> Option.is_some (X.ac_extract r)) (X.leaves r)
+
+    let contains_ac_list l =
+      List.exists (fun (r, _) -> contains_ac r) l
+
+    let fresh_for_ac x =
+      let k = E.fresh_ac_name (E.type_info x) in
+      let eq = E.mk_eq ~iff:false k x in
+      X.term_embed k, [ eq ]
+
+    let make_for_ac sy x =
+      let rx, ctx = X.make x in
+      match X.ac_extract rx with
+      | Some { h ; l ; _ } when Sy.equal sy h ->
+        if contains_ac_list l then fresh_for_ac x
+        else rx, ctx
+      | None | Some _ ->
+        if contains_ac rx then fresh_for_ac x
+        else rx, ctx
+
+    let make_for_or x =
+      let rx, ctx = X.make x in
+      match embed rx with
+      | [ { bv = Other { negated = true ; value = r }; _ } ] -> (
+          match X.ac_extract r with
+          | Some { h = Op BVand ; l ; _ } ->
+            if contains_ac_list l then fresh_for_ac x
+            else rx, ctx
+          | _ ->
+            if contains_ac rx then fresh_for_ac x
+            else rx, ctx
+        )
+      | _ ->
+        if contains_ac rx then fresh_for_ac x
+        else rx, ctx
+
+    let make_for_and = make_for_ac (Op BVand)
+
+    let make_for_xor = make_for_ac (Op BVxor)
+
+    let make_for_add = make_for_ac (Op BVadd)
+
+    let make_for_mul = make_for_ac (Op BVmul)
+
+    let logand x y =
+      logand_list (to_ac (Op BVand) x y)
+
+    let lognot x = is_mine (negate_abstract (embed x))
+
+    let logor x y = lognot (logand (lognot x) (lognot y))
+
+    let logxor x y =
+      logxor_list (to_ac (Op BVxor) x y)
+
     let other ~neg t _sz ctx =
       let r, ctx' =
+        (* Note: all these simplifications are duplicated in [bitv_rel] as
+           constraints, so that they can trigger later. *)
         match E.term_view t with
-        | { f = Op (
-            BVand | BVor | BVxor
-            | BVadd | BVsub | BVmul | BVudiv | BVurem
-            | BVshl | BVlshr
-          ); _ } ->
+        | { f = Op BVand ; xs = [ x ; y ] ; _ } ->
+          let x, ctx = make_for_and x and y, ctx' = make_for_and y in
+          logand x y, ctx @ ctx'
+        | { f = Op BVor ; xs = [ x ; y ] ; _ } ->
+          let x, ctx = make_for_or x and y, ctx' = make_for_or y in
+          logor x y, ctx @ ctx'
+        | { f = Op BVxor ; xs = [ x ; y ] ; _ } ->
+          let x, ctx = make_for_xor x and y, ctx' = make_for_xor y in
+          logxor x y, ctx @ ctx'
+        | { f = Op BVadd ; xs = [ x ; y ] ; _ } ->
+          let x, ctx = make_for_add x and y, ctx' = make_for_add y in
+          add x y, ctx @ ctx'
+        | { f = Op BVmul ; xs = [ x ; y ] ; _ } ->
+          let x, ctx = make_for_mul x and y, ctx' = make_for_mul y in
+          mul x y, ctx @ ctx'
+        | { f = Op BVsub; xs = [ x ; y ] ; _ } -> (
+            let y, ctx = X.make y in
+            match value y with
+            | Some n ->
+              let x, ctx' = make_for_add x in
+              add x (const_like x (Z.neg n)), ctx @ ctx'
+            | None -> X.term_embed t, []
+          )
+        | { f = Op (BVudiv | BVurem | BVshl | BVlshr); _ } ->
           X.term_embed t, []
         | _ -> X.make t
       in
@@ -1290,15 +1535,6 @@ module Shostak(X : ALIEN) = struct
         | Cte _ -> true
         | Other r | Ext (r, _, _, _) -> X.is_constant r.value) bitv
 
-  let is_mine_opt = function
-    | [{ bv = Other { value = r; negated = false }; _ }] -> Some r
-    | _ -> None
-
-  let is_mine bv =
-    match is_mine_opt bv with
-    | Some r -> r
-    | None -> X.embed bv
-
   let print = Debug.print_C_ast
 
   (* This is used to extract terms from non-bitv semantic values.
@@ -1394,7 +1630,20 @@ module Shostak(X : ALIEN) = struct
       let r, ctx = Canon.make t in
       is_mine r, ctx
 
-  let color _ = assert false
+  let color ac =
+    match ac.Sig.l with
+    | [(_, 1)] -> assert false
+    | _ ->
+      (* TODO(bclement): we probably should be able to perform some
+         simplifications here, but we need to make sure we don't hit one of the
+         AC(X) performance bugs. For instance, it is not clear that
+         distributivity should be taken into consideration here.. *)
+      match ac.Sig.h with
+      | Op BVand -> logand_list ac.Sig.l
+      | Op BVxor -> logxor_list ac.Sig.l
+      | Op BVadd -> add_list ac.Sig.l
+      | Op BVmul -> mul_list ac.Sig.l
+      | _ -> X.ac_embed ac
 
   let type_info bv =
     let sz = List.fold_left (fun acc bv -> bv.sz + acc) 0 bv in
@@ -1416,8 +1665,8 @@ module Shostak(X : ALIEN) = struct
 
     match X.extract u , X.extract t with
     | None   , None   -> if X.str_cmp u t > 0 then [u,t] else [t,u]
-    | None   , Some [ { bv = Cte _; _ } ] -> [u,t]
-    | Some [ { bv = Cte _; _ } ],    None -> [t,u]
+    | None   , Some _ when not (List.mem u (X.leaves t)) -> [u, t]
+    | Some _,  None when not (List.mem t (X.leaves u)) -> [t, u]
     | None   , Some t -> solve_ter (embed u) t
     | Some u , None   -> solve_ter u (embed t)
     | Some u , Some t -> solve_ter u t

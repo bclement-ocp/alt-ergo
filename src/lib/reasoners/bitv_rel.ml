@@ -1058,6 +1058,10 @@ end = struct
       (* y = x + y -> x = 0 *)
       add_eq_const ~ex acts x Z.zero; true
 
+    | Blshr when X.equal x y ->
+      (* s >> s = 0 because s < 2^s *)
+      add_eq_const ~ex acts r Z.zero; true
+
     | _ -> false
 
   let simplify_binop ~ex acts op r x y =
