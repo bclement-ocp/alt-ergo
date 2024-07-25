@@ -450,7 +450,7 @@ module Shostak(X : ALIEN) = struct
     let cte, vars =
       List.fold_left (fun (cte, vars) (r, n) ->
           match value r with
-          | Some m -> (Z.(~$n * m), vars)
+          | Some m -> (Z.(~$n * m + cte), vars)
           | None -> (cte, (r, n) :: vars)
         ) (Z.zero, []) l
     in
