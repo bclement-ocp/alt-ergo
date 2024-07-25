@@ -642,13 +642,13 @@ module Shostak(X : ALIEN) = struct
         | { f = Op BVxor ; xs = [ x ; y ] ; _ } ->
           let x, ctx = make_for_xor x and y, ctx' = make_for_xor y in
           logxor x y, ctx @ ctx'
-        | { f = Op BVadd ; xs = [ x ; y ] ; _ } ->
+        | { f = Op BVadd ; xs = [ x ; y ] ; _ } when false ->
           let x, ctx = make_for_add x and y, ctx' = make_for_add y in
           add x y, ctx @ ctx'
-        | { f = Op BVmul ; xs = [ x ; y ] ; _ } ->
+        | { f = Op BVmul ; xs = [ x ; y ] ; _ } when false ->
           let x, ctx = make_for_mul x and y, ctx' = make_for_mul y in
           mul x y, ctx @ ctx'
-        | { f = Op BVsub; xs = [ x ; y ] ; _ } -> (
+        | { f = Op BVsub; xs = [ x ; y ] ; _ } when false -> (
             let y, ctx = X.make y in
             match value y with
             | Some n ->
@@ -656,7 +656,9 @@ module Shostak(X : ALIEN) = struct
               add x (const_like x (Z.neg n)), ctx @ ctx'
             | None -> X.term_embed t, []
           )
-        | { f = Op (BVudiv | BVurem | BVshl | BVlshr); _ } ->
+        | { f = Op
+                (BVudiv | BVurem | BVshl | BVlshr | BVadd | BVmul | BVsub)
+          ; _ } ->
           X.term_embed t, []
         | _ -> X.make t
       in
