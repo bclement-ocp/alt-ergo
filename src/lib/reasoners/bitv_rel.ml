@@ -99,6 +99,16 @@ module BitvNormalForm = struct
     in loop Z.zero [] (Shostak.Bitv.embed r)
 end
 
+let finite_lower_bound = function
+  | Intervals_intf.Unbounded -> Z.zero
+  | Closed n -> n
+  | Open n -> Z.succ n
+
+let finite_upper_bound ~size:sz = function
+  | Intervals_intf.Unbounded -> Z.extract Z.minus_one 0 sz
+  | Closed n -> n
+  | Open n -> Z.pred n
+
 module BV2Nat = struct
   (* Domain for bv2nat and int2bv conversions
 
@@ -426,7 +436,7 @@ module BV2Nat = struct
 
      This may require introducing new variables to represent unknown
      extractions. *)
-  let composite bv t =
+  let composite find_ext bv t =
     let rec loop p ex t = function
       | [] -> (p, ex), t
       | { Bitv.bv = Bitv.Cte n ; sz } :: bv' ->
@@ -435,7 +445,7 @@ module BV2Nat = struct
       | { bv = Other s ; sz } :: bv' ->
         let p = T.Ints. (p *$$ Z.(one lsl sz)) in
         let (p_value, ex_value), t =
-          find_or_init_ext
+          find_ext
             s.value (Extraction.full ~size:sz) t
         in
         let p_value =
@@ -446,7 +456,7 @@ module BV2Nat = struct
       | { bv = Ext (s, _s_sz, i, j) ; sz } :: bv' ->
         let p = T.Ints.(p *$$ Z.(one lsl sz)) in
         let (p_value, ex_value), t =
-          find_or_init_ext
+          find_ext
             s.value (Extraction.of_ae i j) t
         in
         let p_value =
@@ -456,6 +466,10 @@ module BV2Nat = struct
         loop T.Ints.(p + p_value) (Ex.union ex ex_value) t bv'
     in
     loop T.Ints.zero Ex.empty t (Shostak.Bitv.embed bv)
+
+  let find_or_init_composite = composite find_or_init_ext
+
+  let find_composite = composite (fun bv ext t -> find_ext bv ext t, t)
 
   (* Add the equality [nat_r = bv2nat(bv_r)]. *)
   let add_bv2nat ~ex nat_r bv_r t =
@@ -484,7 +498,7 @@ module BV2Nat = struct
         let p = if s.negated then lognot_p ~size:sz p else p in
         add ~ex s.value (Extraction.of_ae i j) p t
       | _ ->
-        let (p', ex'), t = composite x t in
+        let (p', ex'), t = find_or_init_composite x t in
         { t with eqs = (T.Ints.mkv_eq p p', Ex.union ex ex') :: t.eqs }
 
   (* Add the equality [bv_r = int2bv(int_r)].
@@ -572,6 +586,85 @@ module BV2Nat = struct
     | Tint -> subst_int ~ex rr nrr t
     | Tbitv _ -> subst_bitv ~ex rr nrr t
     | _ -> t
+
+  (* Called when bounds on an integer variable are updated; should propagate
+     the same bounds at the bit-vector level. *)
+  let record_int_bounds r int t =
+    (* TODO(bclement): Currently we need to use literals to propagate bounds
+       (otherwise we might not get the bitv propagators to run),
+       so that we can only propagate intervals and not union-of-intervals.
+
+       At some point we should have proper multi-theory propagation, in which
+       case we only have to intersect the appropriate intervals. *)
+    match find_p (T.Ints.of_repr r) t with
+    | exception Not_found -> t
+    | (bv, ext, ex_bv) ->
+      let sz = ext.len in
+      let lb, ex_lb = Intervals.Int.lower_bound int in
+      let ub, ex_ub = Intervals.Int.upper_bound int in
+      let lb = finite_lower_bound lb in
+      let ub = finite_upper_bound ~size:sz ub in
+      let bv = T.BV.extract bv ext in
+      let eqs = t.eqs in
+      let eqs =
+        if Z.compare lb Z.zero >= 0 then
+          let lit =
+            if Z.numbits lb <= sz then
+              Uf.LX.mkv_builtin true BVULE [ const sz lb ; bv ]
+            else
+              Uf.LX.mkv_eq X.top X.bot
+          in
+          (lit, Ex.union ex_lb ex_bv) :: eqs
+        else
+          eqs
+      in
+      let eqs =
+        let ex = Ex.union ex_ub ex_bv in
+        if Z.compare ub Z.zero < 0 then
+          (Uf.LX.mkv_eq X.top X.bot, ex) :: eqs
+        else if Z.numbits ub <= sz then
+          (Uf.LX.mkv_builtin true BVULE [ bv ; const sz ub ], ex) :: eqs
+        else
+          eqs
+      in
+      { t with eqs }
+
+  let record_poly_bounds ~ex p (lb, ex_lb) (ub, ex_ub) =
+    let lit_lb = T.Ints.(mkv_le ~$$lb p) in
+    let lit_ub = T.Ints.(mkv_le p ~$$ub) in
+    let ex_lb = Ex.union ex ex_lb in
+    let ex_ub = Ex.union ex ex_ub in
+    [ (lit_lb, ex_lb) ; (lit_ub, ex_ub) ]
+
+  (* Called when bounds on a bit-vector variable are updated; should propagate
+     the same bounds at the integer level. *)
+  let record_bitv_bounds r int t =
+    (* TODO(bclement): Currently we need to use literals to propagate bounds
+       (otherwise we might not get the bitv propagators to run),
+       so that we can only propagate intervals and not union-of-intervals.
+
+       At some point we should have proper multi-theory propagation, in which
+       case we only have to intersect the appropriate intervals. *)
+    let lb, ex_lb = Intervals.Int.lower_bound int in
+    let ub, ex_ub = Intervals.Int.upper_bound int in
+    let lb = finite_lower_bound lb in
+    let ub = finite_upper_bound ~size:(bitwidth r) ub in
+    match BitvNormalForm.normal_form r with
+    | Constant _ -> []
+    | Atom (x, ofs) -> (
+        match find_ext x (Extraction.full ~size:(bitwidth x)) t.bv2nat with
+        | exception Not_found -> []
+        | (p, ex_p) ->
+          let p' = T.Ints.(p +$$ ofs) in
+          record_poly_bounds ~ex:ex_p p' (lb, ex_lb) (ub, ex_ub)
+      )
+    | Composite (x, ofs) -> (
+        match find_composite x t.bv2nat with
+        | exception Not_found -> []
+        | (p, ex_p), _ ->
+          let p' = T.Ints.(p +$$ ofs) in
+          record_poly_bounds ~ex:ex_p p' (lb, ex_lb) (ub, ex_ub)
+      )
 
   let flush t =
     t.eqs, { t with eqs = [] }
@@ -1728,16 +1821,6 @@ end = struct
   end
 end
 
-let finite_lower_bound = function
-  | Intervals_intf.Unbounded -> Z.zero
-  | Closed n -> n
-  | Open n -> Z.succ n
-
-let finite_upper_bound ~size:sz = function
-  | Intervals_intf.Unbounded -> Z.extract Z.minus_one 0 sz
-  | Closed n -> n
-  | Open n -> Z.pred n
-
 (* If m and M are the minimal and maximal values of an union of intervals, the
    longest sequence of most significant bits shared between m and M can be fixed
    in the bit-vector domain; see "Is to BVs" in section 4.1 of
@@ -2106,7 +2189,7 @@ and run_repeatedly state schedule did_run =
   else
     did_run
 
-let rec propagate_all uf eqs bdom idom =
+let rec propagate_all uf eqs bdom idom bvconv =
   (* Optimization to avoid unnecessary allocations *)
   let do_bitlist = Bitlist_domains.needs_propagation bdom in
   let do_intervals = Interval_domains.needs_propagation idom in
@@ -2135,6 +2218,13 @@ let rec propagate_all uf eqs bdom idom =
         ) state.bitlist_changed eqs
     in
 
+    let eqs =
+      HX.fold (fun r () eqs ->
+          let int = Interval_domains.Ephemeral.(Entry.domain (entry idom r)) in
+          List.rev_append (BV2Nat.record_bitv_bounds r int bvconv) eqs
+        ) state.interval_changed eqs
+    in
+
     let bdom, idom =
       Bitlist_domains.snapshot bdom, Interval_domains.snapshot idom
     in
@@ -2143,9 +2233,9 @@ let rec propagate_all uf eqs bdom idom =
     in
 
     (* Propagate again in case constraints were simplified. *)
-    propagate_all uf eqs bdom idom
+    propagate_all uf eqs bdom idom bvconv
   else
-    eqs, bdom, idom
+    eqs, bdom, idom, bvconv
 
 type t =
   { terms : SX.t
@@ -2166,7 +2256,7 @@ let assume env uf la =
   let int_domain =
     Uf.GlobalDomains.find (module Interval_domains) ds
   in
-  let (domain, int_domain, eqs, size_splits) =
+  let (domain, int_domain, eqs, size_splits, bvconv) =
     try
       let (domain, int_domain, eqs, size_splits) =
         List.fold_left
@@ -2215,7 +2305,9 @@ let assume env uf la =
           (domain, int_domain, [], env.size_splits)
           la
       in
-      let eqs, domain, int_domain = propagate_all uf eqs domain int_domain in
+      let eqs, domain, int_domain, bvconv =
+        propagate_all uf eqs domain int_domain bvconv
+      in
       if Options.get_debug_bitv () && not (Lists.is_empty eqs) then (
         Printer.print_dbg
           ~module_name:"Bitv_rel" ~function_name:"assume"
@@ -2224,7 +2316,7 @@ let assume env uf la =
           ~module_name:"Bitv_rel" ~function_name:"assume"
           "interval domain: @[%a@]" Interval_domains.pp int_domain;
       );
-      (domain, int_domain, eqs, size_splits)
+      (domain, int_domain, eqs, size_splits, bvconv)
     with Bitlist.Inconsistent ex | Interval_domain.Inconsistent ex ->
       raise @@ Ex.Inconsistent (ex, Uf.cl_extract uf)
   in
@@ -2311,9 +2403,15 @@ let add env uf r t =
       match E.term_view t with
       | { f = Op BV2Nat ; xs = [ x ] ; _ } ->
         let bvconv = Uf.GlobalDomains.find (module BV2Nat) ds in
+        let idom = Uf.GlobalDomains.find (module Interval_domains) ds in
         let rx, ex = Uf.find uf x in
         let bvconv = BV2Nat.add_bv2nat ~ex r rx bvconv in
         let eqs, bvconv = BV2Nat.flush bvconv in
+        let eqs =
+          List.rev_append
+            (BV2Nat.record_bitv_bounds rx (Interval_domains.get rx idom) bvconv)
+            eqs
+        in
         env,
         Uf.GlobalDomains.add (module BV2Nat) bvconv ds,
         eqs

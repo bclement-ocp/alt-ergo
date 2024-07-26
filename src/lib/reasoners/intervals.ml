@@ -940,6 +940,10 @@ module Legacy = struct
       in
       (lb, ub)
 
+  let to_int = function
+    | Real _ -> invalid_arg "to_int"
+    | Int u -> u
+
   let lower_bound = function
     | Real u -> Real.lower_bound u
     | Int u ->

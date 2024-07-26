@@ -119,6 +119,7 @@ type t = {
   new_uf : Uf.t;
   th_axioms : (Expr.th_elt * Explanation.t) ME.t;
   linear_dep : SE.t ME.t;
+  bv2nat : Bitv_rel.BV2Nat.t;
   syntactic_matching :
     (Matching_types.trigger_info * Matching_types.gsubst list) list list;
 }
@@ -322,6 +323,9 @@ module Sim_Wrap = struct
 
 end
 
+let improve_bv2nat p i t =
+  Bitv_rel.BV2Nat.record_int_bounds (alien_of p) (I.to_int i) t
+
 module MP = struct
   include MP0
 
@@ -344,7 +348,8 @@ module MP = struct
       if ty == Ty.Tint then
         {env with
          polynomes; improved_p;
-         int_sim = Sim_Wrap.add_if_better p old i env.int_sim}
+         int_sim = Sim_Wrap.add_if_better p old i env.int_sim;
+         bv2nat = improve_bv2nat p i env.bv2nat}
       else
         {env with
          polynomes; improved_p;
@@ -691,6 +696,7 @@ let empty uf = {
   classes = Uf.cl_extract uf;
   size_splits = Q.one;
   new_uf = Uf.empty;
+  bv2nat = Bitv_rel.BV2Nat.empty;
 
   rat_sim =
     Sim.Solve.solve
@@ -1571,6 +1577,11 @@ let rec loop_update_intervals are_eq env cpt =
   then env
   else loop_update_intervals are_eq env cpt
 
+let update_uf env uf =
+  let ds = Uf.domains uf in
+  let bv2nat = Uf.GlobalDomains.find (module Bitv_rel.BV2Nat) ds in
+  { env with new_uf = uf ; bv2nat }
+
 let assume ~query env uf la =
   let module Oracle = (val get_oracle ()) in
   Oracle.incr_age ();
@@ -1579,8 +1590,10 @@ let assume ~query env uf la =
   let classes = Uf.cl_extract uf in
   let rclass_of = Uf.rclass_of uf in
   let env =
-    {env with
-     improved_p=SP.empty; improved_x=SX.empty; classes; new_uf = uf}
+    update_uf
+      { env with
+        improved_p=SP.empty; improved_x=SX.empty; classes }
+      uf
   in
   Debug.env env;
   let nb_num = ref 0 in
@@ -1677,6 +1690,13 @@ let assume ~query env uf la =
       let env = Sim_Wrap.solve env 1 in
       let env = loop_update_intervals are_eq env 0 in
       let env, eqs = equalities_from_intervals env eqs in
+      let bv_eqs, bv2nat = Bitv_rel.BV2Nat.flush env.bv2nat in
+      let eqs =
+        List.fold_left
+          (fun eqs (lit, ex) -> (lit, None, ex, Th_util.Other) :: eqs)
+          eqs bv_eqs
+      in
+      let env = { env with bv2nat } in
 
       Debug.env env;
       let to_assume = Rel_utils.assume_nontrivial_eqs eqs la in
@@ -1695,7 +1715,9 @@ let assume ~query env uf la =
          if Uf.is_normalized uf (alien_of p) then mp else MP.remove p mp)
       env.polynomes env.polynomes
   in
-  {env with polynomes = polys}, Uf.domains uf, res
+  let ds = Uf.domains uf in
+  let ds = Uf.GlobalDomains.add (module Bitv_rel.BV2Nat) env.bv2nat ds in
+  {env with polynomes = polys}, ds, res
 
 let query env uf a_ex =
   try
@@ -1786,7 +1808,7 @@ let add =
   fun env new_uf r t ->
     Debug.env env;
     try
-      let env = {env with new_uf} in
+      let env = update_uf env new_uf in
       let p = poly_of r in
       Debug.add p;
       if is_num r then
@@ -1796,7 +1818,11 @@ let add =
         let delayed, eqs =
           Rel_utils.Delayed.add env.delayed env.new_uf r t
         in
-        { env with delayed }, Uf.domains new_uf, eqs
+        let ds = Uf.domains new_uf in
+        let bv_eqs, bv2nat = Bitv_rel.BV2Nat.flush env.bv2nat in
+        let eqs = List.rev_append bv_eqs eqs in
+        let ds = Uf.GlobalDomains.add (module Bitv_rel.BV2Nat) bv2nat ds in
+        { env with delayed }, ds, eqs
       else env, Uf.domains new_uf, []
     with I.NotConsistent expl ->
       Debug.inconsistent_interval expl;

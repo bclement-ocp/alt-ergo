@@ -167,6 +167,11 @@ module Legacy : sig
     (Numbers.Z.t * Explanation.t) option *
     (Numbers.Z.t * Explanation.t) option
 
+  val to_int : t -> Int.t
+  (** Convert to an integer interval.
+
+      @raises Invalid_argument if this is not an integer interval. *)
+
   val borne_inf : t -> Numbers.Q.t * Explanation.t * bool
   (** bool is true when bound is large. Raise: No_finite_bound if no
       finite lower bound *)
