@@ -405,6 +405,10 @@ let smt_fpa_builtins =
     Dl.Typer.T.builtin_term @@
     Dolmen_type.Base.term_app2 (module Dl.Typer.T) env s f
   in
+  let term_app1 env s f =
+    Dl.Typer.T.builtin_term @@
+    Dolmen_type.Base.term_app1 (module Dl.Typer.T) env s f
+  in
   let other_builtins =
     DStd.Id.Map.empty
     |> add_rounding_modes
@@ -425,6 +429,8 @@ let smt_fpa_builtins =
       end
     | Id { ns = Term ; name = Simple "ae.float16" } ->
       term_app env s (smt_round 11 24)
+    | Id { ns = Term ; name = Simple "bv2int" } ->
+      term_app1 env s DE.Term.Bitv.to_nat
     | Id { ns = Term ; name = Simple "ae.float32" } ->
       term_app env s (smt_round 24 149)
     | Id { ns = Term ; name = Simple "ae.float64" } ->
