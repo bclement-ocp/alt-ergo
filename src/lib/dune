@@ -60,7 +60,7 @@
     Expr Var Ty Typed Xliteral ModelMap Id Uid Objective Literal
     ; util
     Emap Gc_debug Hconsing Hstring Heap Lists Loc
-    MyUnix Numbers Uqueue
+    MyUnix Numbers Uqueue Type
     Options Timers Util Vec Version Steps Printer My_zip
     Theories Nest
   )
