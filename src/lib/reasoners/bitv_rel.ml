@@ -31,6 +31,7 @@ module Sy = Symbols
 module X = Shostak.Combine
 module SX = Shostak.SXH
 module MX = Shostak.MXH
+module ME = Expr.Map
 module HX = Shostak.HX
 module L = Xliteral
 
@@ -176,9 +177,15 @@ module BV2Nat = struct
 
       let ( - ) = P.sub
 
-      let ( +$$ ) p n = P.add_const (Q.of_bigint n) p
+      let ( * ) = P.mult
 
-      let ( *$$ ) p n = P.mult_const (Q.of_bigint n) p
+      let ( +$$$ ) p q = P.add_const q p
+
+      let ( +$$ ) p n = p +$$$ Q.of_bigint n
+
+      let ( *$$$ ) p q = P.mult_const q p
+
+      let ( *$$ ) p n = p *$$$ Q.of_bigint n
 
       let mkv_eq p p' = Uf.LX.mkv_eq (to_repr p) (to_repr p')
 
@@ -235,6 +242,9 @@ module BV2Nat = struct
         implementation of the [int2bv] function (although both coincide for
         entries in the map). *)
     ; use : T.Ints.Set.t MX.t
+
+    ; poly : P.t ME.t
+
     (** Map from integer variables to the polynomials that use them.
 
         This is used for integer substitutions because of our encoding of
@@ -263,6 +273,7 @@ module BV2Nat = struct
     { bv2nat = MX.empty
     ; nat2bv = T.Ints.Map.empty
     ; use = MX.empty
+    ; poly = ME.empty
     ; eqs = [] }
 
   let fold_ext x f t acc =
@@ -320,7 +331,7 @@ module BV2Nat = struct
             if Extraction.Map.is_empty m then None else Some m
         ) t.bv2nat
     in
-    { use ; nat2bv ; bv2nat ; eqs = t.eqs }
+    { use ; nat2bv ; bv2nat ; eqs = t.eqs ; poly = t.poly }
 
   (* Returns the polynomial associated with [bv2nat(bv) asr ofs], or raises
      [Not_found] if there is none. *)
@@ -340,7 +351,7 @@ module BV2Nat = struct
         let use = add_use_p k t.use in
         let bv2nat = add_ext ~ex:Ex.empty bv ext k t.bv2nat in
         let nat2bv = T.Ints.Map.add k (bv, ext, Ex.empty) t.nat2bv in
-        (k, Ex.empty), { use ; bv2nat ; nat2bv ; eqs = t.eqs }
+        (k, Ex.empty), { use ; bv2nat ; nat2bv ; eqs = t.eqs ; poly = t.poly }
 
   (* Add the definining equation for [bv2nat(bv) asr ofs] to [eqs].
 
@@ -421,7 +432,7 @@ module BV2Nat = struct
       let use = add_use_p p t.use in
       let bv2nat = add_ext ~ex bv ext p t.bv2nat in
       let nat2bv = T.Ints.Map.add p (bv, ext, ex) t.nat2bv in
-      let t = { use ; bv2nat ; nat2bv ; eqs = t.eqs } in
+      let t = { use ; bv2nat ; nat2bv ; eqs = t.eqs ; poly = t.poly } in
       if is_new then
         let (p', ex'), t = init_ext bv ext t in
         { t with eqs = (T.Ints.mkv_eq p p', Ex.union ex ex') :: t.eqs }
@@ -1653,6 +1664,45 @@ end = struct
     simplify_view uf acts (view c)
 end
 
+let find_or_embed x h =
+  let p =
+    try ME.find x h
+    with Not_found -> BV2Nat.T.Ints.of_repr @@ X.term_embed x
+  in
+  p
+
+let process_lol h t =
+  match E.term_view t with
+  | { f = Op BVadd ; xs = [ x ; y ] ; _ } ->
+    let xp = find_or_embed x h in
+    let yp = find_or_embed y h in
+    ME.add t BV2Nat.T.Ints.(xp + yp) h
+  | { f = Op BVsub ; xs = [ x ; y ] ; _ } ->
+    let xp = find_or_embed x h in
+    let yp = find_or_embed y h in
+    ME.add t BV2Nat.T.Ints.(xp - yp) h
+  | { f = Op BVmul ; xs = [ x ; y ] ; _ } ->
+    let xp = find_or_embed x h in
+    let yp = find_or_embed y h in
+    ME.add t BV2Nat.T.Ints.(xp * yp) h
+  | _ -> h
+
+let find_bv2nat uf bv2nat h t =
+  let l, c = Shostak.Polynome.to_list (ME.find t h) in
+  List.fold_left (fun (p, ex, bv2nat) (k, r) ->
+      match X.term_extract r with
+      | Some t', _ ->
+        let r', ex' = Uf.find uf t' in
+        let (nat, ex_nat), bv2nat =
+          BV2Nat.find_or_init_ext
+            r' (BV2Nat.Extraction.full ~size:(bitwidth r')) bv2nat
+        in
+        BV2Nat.T.Ints.(p + nat *$$$ k),
+        Ex.union ex (Ex.union ex' ex_nat),
+        bv2nat
+      | None, _ -> assert false
+    ) (Shostak.Polynome.create [] c Tint, Ex.empty, bv2nat) l
+
 let extract_binop =
   let open Constraint in function
     | Sy.BVand -> Some bvand
@@ -2412,6 +2462,24 @@ let add env uf r t =
             (BV2Nat.record_bitv_bounds rx (Interval_domains.get rx idom) bvconv)
             eqs
         in
+        let eqs, bvconv =
+          match find_bv2nat uf bvconv bvconv.poly x with
+          | px, ex, bvconv ->
+            let kmod =
+              BV2Nat.T.Ints.of_repr @@ X.term_embed (E.fresh_name Tint)
+            in
+            let sz = bitwidth rx in
+            let eqs =
+              let lit =
+                BV2Nat.T.Ints.mkv_eq
+                  px
+                  BV2Nat.T.Ints.(of_repr r + kmod *$$ Z.(one lsl sz))
+              in
+              (lit, ex) :: eqs
+            in
+            eqs, bvconv
+          | exception Not_found -> eqs, bvconv
+        in
         env,
         Uf.GlobalDomains.add (module BV2Nat) bvconv ds,
         eqs
@@ -2433,6 +2501,15 @@ let add env uf r t =
         let terms, dom, idom =
           extract_constraints env.terms dom idom uf r t
         in
+        let bvconv = Uf.GlobalDomains.find (module BV2Nat) ds in
+        let poly = process_lol bvconv.poly t in
+        let poly =
+          match Shostak.Bitv.embed r with
+          | [ { bv = Cte n ; _ } ] ->
+            ME.add t (BV2Nat.T.Ints.of_bigint n)  poly
+          | _ -> poly
+        in
+        let ds = Uf.GlobalDomains.add (module BV2Nat) { bvconv with poly } ds in
         { env with terms },
         Uf.GlobalDomains.add (module Bitlist_domains) dom @@
         Uf.GlobalDomains.add (module Interval_domains) idom @@
