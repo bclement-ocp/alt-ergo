@@ -1,0 +1,5 @@
+(set-logic ALL)
+(declare-const x (_ BitVec 32))
+(declare-const y (_ BitVec 32))
+(assert (distinct (bv2nat (bvadd x (bvsub y (bvadd x (bvadd y y))))) (bv2nat (bvneg y))))
+(check-sat)
