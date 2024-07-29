@@ -43,7 +43,7 @@
 type (_, _) eq = Equal : ('a, 'a) eq
 
 module Id : sig
-  type !'a t
+  type 'a t
 
   val make : unit -> 'a t
 

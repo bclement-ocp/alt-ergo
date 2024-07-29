@@ -1627,12 +1627,12 @@ type state =
 type 'a hashable = (module Hashtbl.HashedType with type t = 'a)
 
 module Any_propagator : sig
-  type !'a t
+  type 'a t
 
   val make : 'a hashable -> (state -> 'a -> unit) -> 'a t
 
   module Queue : sig
-    type !'a propagator = 'a t
+    type 'a propagator = 'a t
 
     type t
 
@@ -1643,7 +1643,7 @@ module Any_propagator : sig
     val run1 : state -> t -> bool
   end
 end = struct
-  type !'a t =
+  type 'a t =
     { id : 'a Type.Id.t
     ; hashable : 'a hashable
     ; run : state -> 'a -> unit }
@@ -1671,7 +1671,7 @@ end = struct
   module Q = Uqueue.Make(Binding)
 
   module Queue = struct
-    type !'a propagator = 'a t
+    type 'a propagator = 'a t
 
     type t = Q.t
 
