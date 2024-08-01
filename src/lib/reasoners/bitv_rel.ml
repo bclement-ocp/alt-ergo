@@ -1644,12 +1644,12 @@ module Any_propagator : sig
   end
 end = struct
   type 'a t =
-    { id : 'a Type.Id.t
+    { id : 'a Compat.Type.Id.t
     ; hashable : 'a hashable
     ; run : state -> 'a -> unit }
 
   let make hashable run =
-    { id = Type.Id.make () ; hashable ; run }
+    { id = Compat.Type.Id.make () ; hashable ; run }
 
   type binding = B : 'k t * 'k -> binding
 
@@ -1657,7 +1657,7 @@ end = struct
     type t = binding
 
     let equal (B (k1, v1)) (B (k2, v2)) =
-      match Type.Id.provably_equal k1.id k2.id with
+      match Compat.Type.Id.provably_equal k1.id k2.id with
       | Some Equal ->
         let module T = (val k1.hashable) in
         T.equal v1 v2
@@ -1665,7 +1665,7 @@ end = struct
 
     let hash (B (k, v)) =
       let module T = (val k.hashable) in
-      Hashtbl.hash (Type.Id.uid k.id, T.hash v)
+      Hashtbl.hash (Compat.Type.Id.uid k.id, T.hash v)
   end
 
   module Q = Uqueue.Make(Binding)
