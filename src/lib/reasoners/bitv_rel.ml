@@ -578,16 +578,6 @@ module BV2Nat = struct
     t.eqs, { t with eqs = [] }
 end
 
-let finite_lower_bound = function
-  | Intervals_intf.Unbounded -> Z.zero
-  | Closed n -> n
-  | Open n -> Z.succ n
-
-let finite_upper_bound ~size:sz = function
-  | Intervals_intf.Unbounded -> Z.extract Z.minus_one 0 sz
-  | Closed n -> n
-  | Open n -> Z.pred n
-
 module Interval_domain = struct
   type t = Intervals.Int.t
 
@@ -1701,6 +1691,16 @@ let propagate_queue queue constraint_propagate structural_propagation =
         (QC.pop queue)
     done
   with QC.Empty -> ()
+
+let finite_lower_bound = function
+  | Intervals_intf.Unbounded -> Z.zero
+  | Closed n -> n
+  | Open n -> Z.succ n
+
+let finite_upper_bound ~size:sz = function
+  | Intervals_intf.Unbounded -> Z.extract Z.minus_one 0 sz
+  | Closed n -> n
+  | Open n -> Z.pred n
 
 (* If m and M are the minimal and maximal values of an union of intervals, the
    longest sequence of most significant bits shared between m and M can be fixed
