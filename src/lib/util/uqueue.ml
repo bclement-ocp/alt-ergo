@@ -34,6 +34,8 @@ module type S = sig
   val is_empty : t -> bool
 
   val clear : t -> unit
+
+  val fold : (elt -> 'a -> 'a) -> t -> 'a -> 'a
 end
 
 module Make(H : Hashtbl.HashedType) : S with type elt = H.t = struct
@@ -64,4 +66,7 @@ module Make(H : Hashtbl.HashedType) : S with type elt = H.t = struct
 
   let clear { queue ; elements } =
     Queue.clear queue; HT.clear elements
+
+  let fold f { elements ; _ } acc =
+    HT.fold (fun elt () acc -> f elt acc) elements acc
 end

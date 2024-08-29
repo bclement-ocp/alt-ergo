@@ -118,10 +118,10 @@ let print_view ?(lbl="") pr_elt fmt vw =
     assert false (* not reachable *)
 
   | Builtin (true, BVULE, [v1;v2]) ->
-    Format.fprintf fmt "%s %a <= %a" lbl pr_elt v1 pr_elt v2
+    Format.fprintf fmt "%s %a <=_u %a" lbl pr_elt v1 pr_elt v2
 
   | Builtin (false, BVULE, [v1;v2]) ->
-    Format.fprintf fmt "%s %a > %a" lbl pr_elt v1 pr_elt v2
+    Format.fprintf fmt "%s %a >_u %a" lbl pr_elt v1 pr_elt v2
 
   | Builtin (_, BVULE, _) ->
     assert false (* not reachable *)

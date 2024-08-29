@@ -333,8 +333,10 @@ struct
 
   exception Inconsistent = D.Inconsistent
 
+  let trigger w t = { t with triggers = W.Set.add w t.triggers }
+
   let watch w r t =
-    let t = { t with triggers = W.Set.add w t.triggers } in
+    let t = trigger w t in
     match NF.normal_form r with
     | Constant _ -> t
     | Atom (a, _) ->

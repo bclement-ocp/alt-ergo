@@ -243,6 +243,8 @@ module type S = sig
       {b Note}: The watch [w] is also immediately triggered for a first
       propagation. *)
 
+  val trigger : watch -> t -> t
+
   val unwatch : watch -> t -> t
   (** [unwatch w] removes [w] from all watch lists. It will no longer be
       triggered.

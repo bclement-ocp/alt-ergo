@@ -57,6 +57,8 @@ module type S = sig
 
   val clear : t -> unit
   (** Discard all elements from the queue. *)
+
+  val fold : (elt -> 'a -> 'a) -> t -> 'a -> 'a
 end
 
 module Make(H : Hashtbl.HashedType) : S with type elt = H.t

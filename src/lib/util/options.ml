@@ -614,7 +614,7 @@ let thread_yield = ref (fun () -> ())
 let set_thread_yield f = thread_yield := f
 
 let (timeout : (unit -> unit) ref) =
-  ref (fun () -> raise Util.Timeout)
+  ref (fun () -> assert false) (* raise Util.Timeout) *)
 
 let set_timeout f = timeout := f
 
