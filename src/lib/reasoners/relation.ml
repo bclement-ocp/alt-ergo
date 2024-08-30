@@ -138,8 +138,21 @@ let case_split env uf ~for_model =
   List.fast_sort
     (fun (_ ,_ , sz1) (_ ,_ , sz2) ->
        match sz1, sz2 with
-       | Th_util.CS (_ , sz1), Th_util.CS (_ , sz2) ->
-         Numbers.Q.compare sz1 sz2
+       | Th_util.CS (th1 , sz1), Th_util.CS (th2 , sz2) -> (
+           (* The bit-vector theory creates many splits of size 2, which means
+              they are often considered first. This is not good in mixed
+              problems (where splitting on other theories is more likely to be
+              useful) because we do not have conflict analysis in the case split
+              mechanism.
+
+              We fix this in a heavy-handed way by always making bit-vector case
+              splits last. *)
+           match th1, th2 with
+           | Th_bitv, Th_bitv -> Q.compare sz1 sz2
+           | Th_bitv, _ -> 1
+           | _, Th_bitv -> -1
+           | _, _ -> Q.compare sz1 sz2
+         )
        | _ -> assert false
     ) splits
 
