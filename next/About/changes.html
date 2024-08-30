@@ -168,6 +168,7 @@ GitHub</a>.</p>
 <section id="command-line-interface">
 <h3>Command-line interface<a class="headerlink" href="#command-line-interface" title="Permalink to this heading"></a></h3>
 <ul class="simple">
+<li><p>Enable FPA theory by default (#1177)</p></li>
 <li><p>Remove deprecated output channels (#782)</p></li>
 <li><p>Deprecate the –use-underscore since it produces models that are not SMT-LIB
 compliant (#805)</p></li>
@@ -217,9 +218,11 @@ enabled (#1025)</p></li>
 <h3>Theory reasoning<a class="headerlink" href="#theory-reasoning" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>Add word-level propagators for the BV theory (#944, #1004, #1007, #1010,
-#1011, #1012, #1040, #1044, #1054, #1055, #1056, #1057, #1065, #1073, #1144)</p></li>
+#1011, #1012, #1040, #1044, #1054, #1055, #1056, #1057, #1065, #1073, #1144,
+#1152)</p></li>
 <li><p>Add interval domains and arithmetic propagators for the BV theory (#1058,
 #1083, #1084, #1085)</p></li>
+<li><p>Native support for bv2nat of bit-vector normal forms (#1154)</p></li>
 <li><p>Fix incompleteness issues in the BV solver (#978, #979)</p></li>
 <li><p>Abstract more arguments of AC symbols to avoid infinite loops when
 they contain other AC symbols (#990)</p></li>
@@ -266,13 +269,13 @@ registered through the dune-site plugin mechanism in the
 <code class="docutils literal notranslate"><span class="pre">(alt-ergo</span> <span class="pre">plugins)</span></code> site to be picked up by Alt-Ergo (#1049).</p></li>
 <li><p>Add a release workflow (#827)</p></li>
 <li><p>Mark the dune.inc file as linguist-generated to avoid huge diffs (#830)</p></li>
-<li><p>Use stdcompat to support older OCaml versions (#866)</p></li>
 <li><p>Use GitHub Actions badges in the README (#882)</p></li>
 <li><p>Use <code class="docutils literal notranslate"><span class="pre">dune</span> <span class="pre">build</span> <span class="pre">&#64;check</span></code> to build the project (#887)</p></li>
 <li><p>Enable warnings as errors on the CI (#888)</p></li>
 <li><p>Uniformization of internal identifiers generation (#905, #918)</p></li>
 <li><p>Use an efficient <code class="docutils literal notranslate"><span class="pre">String.starts_with</span></code> implementation (#912)</p></li>
 <li><p>Fix the Makefile (#914)</p></li>
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">Logs</span></code> dependency (#1206)</p></li>
 </ul>
 </section>
 <section id="testing">
