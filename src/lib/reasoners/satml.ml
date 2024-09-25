@@ -96,8 +96,6 @@ module type SAT_ML = sig
     t ->
     Models.t Lazy.t * Objective.Model.t
 
-  val set_new_proxies : t -> FF.proxies -> unit
-
   val new_vars :
     t ->
     nbv : int -> (* nb made vars *)
@@ -117,7 +115,7 @@ module type SAT_ML = sig
     t -> FF.hcons_env -> Satml_types.Atom.Set.t
   val current_tbox : t -> th
   val set_current_tbox : t -> th -> unit
-  val create : Atom.hcons_env -> t
+  val create : proxies:FF.proxies -> Atom.hcons_env -> t
 
   val assume_th_elt : t -> Expr.th_elt -> Explanation.t -> unit
   val decision_level : t -> int
@@ -304,7 +302,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       mutable cpt_current_propagations : int;
 
-      mutable proxies : FF.proxies;
+      proxies : FF.proxies;
       (** Map from flat formulas to the proxies that represent them.
 
           Note: the [Satml] module does not touch the [proxies] field itself; it
@@ -443,7 +441,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   exception Conflict of Atom.clause
   (*module Make (Dummy : sig end) = struct*)
 
-  let create hcons_env =
+  let create ~proxies hcons_env =
     {
       hcons_env;
 
@@ -522,7 +520,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
       cpt_current_propagations = 0;
 
-      proxies = FF.empty_proxies;
+      proxies;
 
       lazy_cnf = Matoms.empty;
 
@@ -921,16 +919,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   module SA = Atom.Set
 
-  let get_atom_or_proxy f proxies =
-    let open FF in
-    match view f with
-    | UNIT a -> a
-    | _ ->
-      match get_proxy_of f proxies with
-      | Some a -> a
-      | None -> assert false
-
-
   (* [add_form_to_lazy_cnf env lazy_cnf ff] updates [env] and [lazy_cnf] by
      assuming the flat formula [ff].
 
@@ -954,7 +942,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     let add_disj env ma f_a l =
       List.fold_left
         (fun ma fchild ->
-           let child = get_atom_or_proxy fchild env.proxies in
+           let child = FF.get_atom_of fchild env.proxies in
            let ctt =
              try Matoms.find child ma |> fst with Not_found -> MFF.empty
            in
@@ -980,7 +968,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
           | OR l  ->
             match List.find_opt (fun e ->
-                let p = get_atom_or_proxy e env.proxies in
+                let p = FF.get_atom_of e env.proxies in
                 p.is_true) l
             with
             | None   -> add_disj env ma f_a l
@@ -1017,7 +1005,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             (fun fp lp ma ->
                List.fold_left
                  (fun ma bf ->
-                    let b = get_atom_or_proxy bf env.proxies in
+                    let b = FF.get_atom_of bf env.proxies in
                     if Atom.eq_atom a b then ma
                     else
                       let mf_b, fb =
@@ -1029,7 +1017,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                  )ma lp
             )parents ma
         in
-        assert (let a = get_atom_or_proxy f_a env.proxies in a.is_true);
+        assert (let a = FF.get_atom_of f_a env.proxies in a.is_true);
         add_form_to_lazy_cnf env ma f_a
       with Not_found -> ma
 
@@ -2102,9 +2090,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
          [hcons_env] are now semantic literals.
          assert (nbv = Vec.size env.vars); *)
       accu
-
-  let set_new_proxies env proxies =
-    env.proxies <- proxies
 
   let try_to_backjump_further =
     let rec better_bj env sf =

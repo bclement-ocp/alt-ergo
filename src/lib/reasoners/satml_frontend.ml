@@ -57,7 +57,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     mutable conj : (int * SE.t) FF.Map.t;
     mutable abstr_of_axs : (FF.t * Atom.atom) ME.t;
     mutable axs_of_abstr : (E.t * Atom.atom) ME.t;
-    mutable proxies : FF.proxies;
+    proxies : FF.proxies;
     mutable inst : Inst.t;
     mutable skolems : E.gformula ME.t; (* key <-> f *)
     add_inst : E.t -> bool;
@@ -87,8 +87,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
 
   let empty ?(selector=fun _ -> true) () =
     let ff_hcons_env = FF.empty_hcons_env () in
+    let proxies = FF.create_proxies () in
     { gamma = ME.empty;
-      satml = SAT.create (FF.atom_hcons_env ff_hcons_env);
+      satml = SAT.create ~proxies (FF.atom_hcons_env ff_hcons_env);
       ff_hcons_env ;
       nb_mrounds = 0;
       last_forced_normal = 0;
@@ -96,7 +97,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       conj = FF.Map.empty;
       abstr_of_axs = ME.empty;
       axs_of_abstr = ME.empty;
-      proxies = FF.empty_proxies;
+      proxies;
       inst = Inst.empty;
       skolems = ME.empty;
       guards = init_guards ();
@@ -814,10 +815,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
                activate = FF.Set.add ff acc.activate;
                updated = true}
           else
-            let ff_abstr,new_proxies,proxies_mp, new_vars =
+            let ff_abstr,new_proxies, new_vars =
               FF.cnf_abstr env.ff_hcons_env ff env.proxies acc.new_vars
             in
-            env.proxies <- proxies_mp;
             let nunit =
               List.fold_left FF.expand_proxy_defn acc.nunit new_proxies
             in
@@ -832,7 +832,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
             in
             acc
 
-  let cdcl_assume env pending ~dec_lvl =
+  let cdcl_assume' env pending ~dec_lvl =
     let { seen_f; activate; new_vars; unit; nunit; updated; _ } = pending in
     (*
     fprintf fmt "pending : %d distinct forms@." (SE.cardinal seen_f);
@@ -854,7 +854,6 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         let f = E.vrai
                 [@ocaml.ppwarning "TODO: should fix for unsat cores generation"]
         in
-        SAT.set_new_proxies env.satml env.proxies;
         let nbv = FF.nb_made_vars env.ff_hcons_env in
         let unit, nunit = SAT.new_vars env.satml ~nbv new_vars unit nunit in
         (*update_lazy_cnf done inside assume at the right place *)
@@ -872,7 +871,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     in
     (*fprintf fmt "@.assume aux: %d@." (List.length l);*)
     let pending = List.fold_left (pre_assume env) pending l in
-    cdcl_assume env pending ~dec_lvl;
+    cdcl_assume' env pending ~dec_lvl;
     pending.updated, pending.new_abstr_vars
 
   let rec assume_aux ~dec_lvl env l =

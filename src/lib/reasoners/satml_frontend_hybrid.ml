@@ -53,7 +53,8 @@ module Make (Th : Theory.S) = struct
 
   let empty () =
     let hcons_env = Atom.empty_hcons_env () in
-    {sat = SAT.create hcons_env;
+    let proxies = Satml_types.Flat_Formula.create_proxies () in
+    {sat = SAT.create ~proxies hcons_env;
      assumed = SE.empty;
      proxies = ME.empty;
      inv_proxies = MA.empty;

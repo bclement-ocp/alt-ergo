@@ -134,7 +134,7 @@ module type FLAT_FORMULA = sig
   type proxies
   (** Mapping from flat formulas to their proxy definition, if any. *)
 
-  val empty_proxies : proxies
+  val create_proxies : unit -> proxies
 
   val equal   : t -> t -> bool
   val compare : t -> t -> int
@@ -160,7 +160,7 @@ module type FLAT_FORMULA = sig
     t * (Expr.t * (t * Atom.atom)) list
     * Atom.var list
 
-  val get_proxy_of : t -> proxies -> Atom.atom option
+  val get_atom_of : t -> proxies -> Atom.atom
   (** [get_proxy_of ff proxies] returns the proxy registered for [ff] in
       [proxies], if it exists.
 
@@ -178,7 +178,6 @@ module type FLAT_FORMULA = sig
     Atom.var list ->
     Atom.atom
     * proxy_defn list
-    * proxies
     * Atom.var list
 
   val expand_proxy_defn :
