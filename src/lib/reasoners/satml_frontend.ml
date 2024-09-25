@@ -745,8 +745,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     seen_f : SE.t;
     activate : FF.Set.t;
     new_vars : Atom.var list;
-    unit : Atom.atom list list;
-    nunit : Atom.atom list list;
+    cnf : Atom.atom list list;
     new_abstr_vars : Atom.atom list;
     updated : bool;
   }
@@ -818,14 +817,13 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
             let ff_abstr,new_proxies, new_vars =
               FF.cnf_abstr env.ff_hcons_env ff env.proxies acc.new_vars
             in
-            let nunit =
-              List.fold_left FF.expand_proxy_defn acc.nunit new_proxies
+            let cnf =
+              List.fold_left FF.expand_proxy_defn acc.cnf new_proxies
             in
             let acc =
               {acc with
                new_vars;
-               nunit;
-               unit = [ff_abstr] :: acc.unit;
+               cnf = [ff_abstr] :: cnf;
                activate = FF.Set.add ff acc.activate;
                updated = true
               }
@@ -833,7 +831,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
             acc
 
   let cdcl_assume' env pending ~dec_lvl =
-    let { seen_f; activate; new_vars; unit; nunit; updated; _ } = pending in
+    let { seen_f; activate; new_vars; cnf; updated; _ } = pending in
     (*
     fprintf fmt "pending : %d distinct forms@." (SE.cardinal seen_f);
     fprintf fmt "pending : %d to activate@." (SFF.cardinal activate);
@@ -845,8 +843,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
     if SE.is_empty seen_f then begin
       assert (FF.Set.is_empty activate);
       assert (new_vars == []);
-      assert (unit == []);
-      assert (nunit == []);
+      assert (cnf == []);
       assert (not updated);
     end
     else
@@ -855,9 +852,9 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
                 [@ocaml.ppwarning "TODO: should fix for unsat cores generation"]
         in
         let nbv = FF.nb_made_vars env.ff_hcons_env in
-        let unit, nunit = SAT.new_vars env.satml ~nbv new_vars unit nunit in
+        let cnf = SAT.new_vars env.satml ~nbv new_vars cnf in
         (*update_lazy_cnf done inside assume at the right place *)
-        SAT.assume env.satml unit nunit f ~cnumber:0 activate ~dec_lvl;
+        SAT.assume env.satml cnf f ~cnumber:0 activate ~dec_lvl;
       with
       | Satml.Unsat (lc) -> raise (IUnsat (env, make_explanation lc))
       | Satml.Sat -> assert false
@@ -865,7 +862,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
   let assume_aux_bis ~dec_lvl env l : bool * Atom.atom list =
     let pending = {
       seen_f = SE.empty; activate = FF.Set.empty;
-      new_vars = []; unit = []; nunit = []; updated = false;
+      new_vars = []; cnf = []; updated = false;
       new_abstr_vars = [];
     }
     in
@@ -1267,8 +1264,8 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       let nbv = FF.nb_made_vars env.ff_hcons_env in
       (* Need to use new_vars function to add the new_var corresponding to
          the atom atom_guard in the satml env *)
-      let u, nu = SAT.new_vars env.satml ~nbv new_vars [] [] in
-      assert (u == [] && nu == []);
+      let c = SAT.new_vars env.satml ~nbv new_vars [] in
+      assert (c == []);
       expr_guard, atom_guard
     | _ -> assert false
 

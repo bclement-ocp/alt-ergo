@@ -158,7 +158,7 @@ module Make (Th : Theory.S) = struct
           try
             let _ =
               SAT.new_vars env.sat ~nbv:(Atom.nb_made_vars env.hcons_env)
-                new_vars [] []
+                new_vars []
             in
             SAT.assume_simple env.sat cnf;
             SAT.assume_simple env.sat pfl;

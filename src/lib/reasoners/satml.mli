@@ -54,12 +54,11 @@ module type SAT_ML = sig
     t ->
     nbv : int -> (* nb made vars *)
     Satml_types.Atom.var list ->
-    Satml_types.Atom.atom list list -> Satml_types.Atom.atom list list ->
-    Satml_types.Atom.atom list list * Satml_types.Atom.atom list list
+    Satml_types.Atom.atom list list ->
+    Satml_types.Atom.atom list list
 
   val assume :
     t ->
-    Satml_types.Atom.atom list list ->
     Satml_types.Atom.atom list list ->
     Expr.t ->
     cnumber : int ->

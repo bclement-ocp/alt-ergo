@@ -100,12 +100,12 @@ module type SAT_ML = sig
     t ->
     nbv : int -> (* nb made vars *)
     Atom.var list ->
-    Atom.atom list list -> Atom.atom list list ->
-    Atom.atom list list * Atom.atom list list
+    Atom.atom list list ->
+    Atom.atom list list
 
   val assume :
     t ->
-    Atom.atom list list -> Atom.atom list list -> E.t ->
+    Atom.atom list list -> E.t ->
     cnumber : int ->
     FF.Set.t -> dec_lvl:int ->
     unit
@@ -2062,29 +2062,29 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           env all_propagations (ref 0) Auto;
     end
 
-  let new_vars env ~nbv new_v unit_cnf nunit_cnf  =
+  let new_vars env ~nbv new_v cnf =
     match new_v with
-    | [] -> unit_cnf, nunit_cnf
+    | [] -> cnf
     | _ ->
       let tenv0 = env.unit_tenv in
       Vec.grow_to_by_double env.vars nbv;
       Vheap.grow_to_by_double env.order nbv;
       let accu =
         List.fold_left
-          (fun ((unit_cnf, nunit_cnf) as accu) (v : Atom.var) ->
+          (fun cnf (v : Atom.var) ->
              Vec.push env.vars v;
              assert (not (is_semantic v.pa));
              insert_var_order env v;
              match th_entailed tenv0 v.pa with
-             | None -> accu
+             | None -> cnf
              | Some (c, sz) ->
                assert (sz >= 1);
-               if sz = 1 then c :: unit_cnf, nunit_cnf
-               else unit_cnf, c :: nunit_cnf
+               if sz = 1 then c :: cnf
+               else c :: cnf
                     [@ocaml.ppwarning
                       "Issue: BAD decision_level, in particular, \
                        if minimal-bj is ON"]
-          ) (unit_cnf, nunit_cnf) new_v
+          ) cnf new_v
       in
       (* This assert is no longer true because some of the vars in the
          [hcons_env] are now semantic literals.
@@ -2125,19 +2125,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       if Options.get_cdcl_tableaux () then
         better_bj env sff
 
-  let assume env unit_cnf nunit_cnf f ~cnumber sff ~dec_lvl =
+  let assume env cnf f ~cnumber sff ~dec_lvl =
     begin
-      match unit_cnf, nunit_cnf with
-      | [], [] -> ()
-      | _, _ ->
+      match cnf with
+      | [] -> ()
+      | _ ->
         let nbc =
-          env.nb_init_clauses + List.length unit_cnf + List.length nunit_cnf in
+          env.nb_init_clauses + List.length cnf in
         Vec.grow_to_by_double env.clauses nbc;
         Vec.grow_to_by_double env.learnts nbc;
         env.nb_init_clauses <- nbc;
 
-        List.iter (add_clause env f ~cnumber) unit_cnf;
-        List.iter (add_clause env f ~cnumber) nunit_cnf;
+        List.iter (add_clause env f ~cnumber) cnf;
 
         if Options.get_verbose () then
           Printer.print_dbg
