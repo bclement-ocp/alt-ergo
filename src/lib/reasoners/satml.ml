@@ -2125,7 +2125,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       if Options.get_cdcl_tableaux () then
         better_bj env sff
 
-
   let assume env unit_cnf nunit_cnf f ~cnumber sff ~dec_lvl =
     begin
       match unit_cnf, nunit_cnf with
