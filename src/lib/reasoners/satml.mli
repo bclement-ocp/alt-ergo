@@ -61,7 +61,6 @@ module type SAT_ML = sig
     t ->
     Satml_types.Atom.atom list list ->
     Expr.t ->
-    cnumber : int ->
     Flat_Formula.Set.t -> dec_lvl:int ->
     unit
 
@@ -78,7 +77,8 @@ module type SAT_ML = sig
   val cancel_until : t -> int -> unit
 
   val exists_in_lazy_cnf : t -> Flat_Formula.t -> bool
-  val known_lazy_formulas : t -> int Flat_Formula.Map.t
+  val fold_known_lazy_formulas :
+    (Flat_Formula.t -> 'a -> 'a) -> t -> 'a -> 'a
 
   val reason_of_deduction: Atom.atom -> Atom.Set.t
   val assume_simple : t -> Atom.atom list list -> unit

@@ -106,7 +106,6 @@ module type SAT_ML = sig
   val assume :
     t ->
     Atom.atom list list -> E.t ->
-    cnumber : int ->
     FF.Set.t -> dec_lvl:int ->
     unit
 
@@ -123,7 +122,8 @@ module type SAT_ML = sig
 
   val exists_in_lazy_cnf : t -> FF.t -> bool
 
-  val known_lazy_formulas : t -> int FF.Map.t
+  val fold_known_lazy_formulas :
+    (FF.t -> 'a -> 'a) -> t -> 'a -> 'a
 
   val reason_of_deduction: Atom.atom -> Atom.Set.t
 
@@ -166,6 +166,32 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   module Matoms = Atom.Map
 
   type th = Th.t
+
+  type ffl =
+    { mutable ff_lvl : int MFF.t
+    (** Map from flat formulas to the (earliest) decision level at which they
+        were asserted. Only used with the CDCL-Tableaux solver. *)
+
+    ; mutable lvl_ff : SFF.t Util.MI.t
+    (** Map from decision level to the set of flat formulas asserted at that
+        level. Set inverse of [ff_lvl]. Only used with the CDCL-Tableaux
+        solver. *)
+    }
+
+  let create_ffl () =
+    { ff_lvl = MFF.empty
+    ; lvl_ff = Util.MI.empty }
+
+  let ffl_cancel ffl lvl =
+    match Util.MI.find lvl ffl.lvl_ff with
+    | s ->
+      ffl.ff_lvl <- SFF.fold MFF.remove s ffl.ff_lvl;
+      ffl.lvl_ff <- Util.MI.remove lvl ffl.lvl_ff
+    | exception Not_found -> ()
+
+  let ffs_at_level lvl ffl =
+    try Util.MI.find lvl ffl.lvl_ff
+    with Not_found -> SFF.empty
 
   module VH = Hashtbl.Make(struct
       type t = Atom.var
@@ -391,14 +417,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       (** Checkpoint of the [relevant] field at each decision level. Only used
           with the CDCL-Tableaux solver. *)
 
-      mutable ff_lvl : int MFF.t;
-      (** Map from flat formulas to the (earliest) decision level at which they
-          were asserted. Only used with the CDCL-Tableaux solver. *)
-
-      mutable lvl_ff : SFF.t Util.MI.t;
-      (** Map from decision level to the set of flat formulas asserted at that
-          level. Set inverse of [ff_lvl]. Only used with the CDCL-Tableaux
-          solver. *)
+      ffl : ffl;
 
       increm_guards : Atom.atom Vec.t;
 
@@ -533,9 +552,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       relevants = SFF.empty;
       relevants_queue = Vec.make 100 ~dummy:(SFF.singleton (FF.faux));
 
-      ff_lvl = MFF.empty;
-
-      lvl_ff = Util.MI.empty;
+      ffl = create_ffl ();
 
       increm_guards = Vec.make 1 ~dummy:Atom.dummy_atom;
 
@@ -663,11 +680,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
 
   let cancel_ff_lvls_until env lvl =
     for i = decision_level env downto lvl + 1 do
-      try
-        let s = Util.MI.find i env.lvl_ff in
-        SFF.iter (fun f' -> env.ff_lvl <- MFF.remove f' env.ff_lvl) s;
-        env.lvl_ff <- Util.MI.remove i env.lvl_ff;
-      with Not_found -> ()
+      ffl_cancel env.ffl i
     done
 
   (* Variables are relevant if they are in the [lazy_cnf]. Semantic variables
@@ -1965,13 +1978,12 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     partition_aux [] [] [] init atoms
 
 
-  let add_clause env f ~cnumber atoms =
+  let add_clause env f atoms =
     if env.is_unsat then raise (Unsat env.unsat_core);
     (*if not (clause_exists atoms) then XXX TODO *)
-    let init_name = string_of_int cnumber in
     let init0 =
       if Options.get_unsat_core () then
-        [Atom.make_clause init_name atoms f false []]
+        [Atom.make_clause "0" atoms f false []]
       else
         [] (* no deps if unsat cores generation is not enabled *)
     in
@@ -2041,25 +2053,19 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       if Options.get_profiling() then Profiling.elim true
 
 
-  let update_lazy_cnf env ~do_bcp sff ~dec_lvl =
+  let update_lazy_cnf env sff ~dec_lvl =
     if Options.get_cdcl_tableaux () && dec_lvl <= decision_level env then begin
-      let s =
-        try Util.MI.find dec_lvl env.lvl_ff
-        with Not_found -> SFF.empty
-      in
+      let s = ffs_at_level dec_lvl env.ffl in
       let lz, s =
         SFF.fold (fun ff (l, s) ->
-            assert (not (MFF.mem ff env.ff_lvl));
+            assert (not (MFF.mem ff env.ffl.ff_lvl));
             assert (not (SFF.mem ff s));
-            env.ff_lvl <- MFF.add ff dec_lvl env.ff_lvl;
+            env.ffl.ff_lvl <- MFF.add ff dec_lvl env.ffl.ff_lvl;
             add_form_to_lazy_cnf env l ff, SFF.add ff s
           ) sff (env.lazy_cnf, s)
       in
       env.lazy_cnf <- lz;
-      env.lvl_ff <- Util.MI.add dec_lvl s env.lvl_ff;
-      if do_bcp then
-        propagate_and_stabilize (*theory_propagate_opt*)
-          env all_propagations (ref 0) Auto;
+      env.ffl.lvl_ff <- Util.MI.add dec_lvl s env.ffl.lvl_ff;
     end
 
   let new_vars env ~nbv new_v cnf =
@@ -2125,7 +2131,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       if Options.get_cdcl_tableaux () then
         better_bj env sff
 
-  let assume env cnf f ~cnumber sff ~dec_lvl =
+  let assume env cnf f sff ~dec_lvl =
     begin
       match cnf with
       | [] -> ()
@@ -2136,7 +2142,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         Vec.grow_to_by_double env.learnts nbc;
         env.nb_init_clauses <- nbc;
 
-        List.iter (add_clause env f ~cnumber) cnf;
+        List.iter (add_clause env f) cnf;
 
         if Options.get_verbose () then
           Printer.print_dbg
@@ -2144,17 +2150,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
             (Vec.size env.clauses)
             (Vec.size env.learnts);
     end;
-    (* do it after add clause and before T-propagate, disable bcp*)
-    update_lazy_cnf env ~do_bcp:false sff ~dec_lvl;
+    (* do it after add clause and before T-propagate *)
+    update_lazy_cnf env sff ~dec_lvl;
     (* do bcp globally *)
+    let prev_dec_lvl = decision_level env in
     propagate_and_stabilize env all_propagations (ref 0) Auto;
-    if dec_lvl > decision_level env then
+    if prev_dec_lvl > decision_level env then
       (*dec_lvl <> 0 and a bj have been made*)
       try_to_backjump_further env sff
 
   let exists_in_lazy_cnf env f' =
     not (Options.get_cdcl_tableaux ()) ||
-    MFF.mem f' env.ff_lvl
+    MFF.mem f' env.ffl.ff_lvl
 
   let boolean_model env = Vec.to_list env.trail
 
@@ -2197,7 +2204,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     copy sv
 *)
 
-  let known_lazy_formulas env = env.ff_lvl
+  let fold_known_lazy_formulas f env acc =
+    FF.Map.fold (fun ff _ acc -> f ff acc) env.ffl.ff_lvl acc
 
   (* HYBRID SAT functions *)
   let assume_simple env cnf =
@@ -2209,7 +2217,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Vec.grow_to_by_double env.learnts nbc;
       env.nb_init_clauses <- nbc;
 
-      List.iter (add_clause env vraie_form ~cnumber:0) cnf;
+      List.iter (add_clause env vraie_form) cnf;
 
       if Options.get_verbose () then
         Printer.print_dbg

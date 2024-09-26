@@ -666,7 +666,7 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       SA.fold add_elit sa SE.empty
 
   let atoms_from_lazy_greedy env =
-    let aux accu ff =
+    let aux ff accu =
       let sf =
         try FF.Map.find ff env.conj |> snd
         with Not_found ->
@@ -679,14 +679,10 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
       in
       SE.fold (E.atoms_rec_of_form ~only_ground:false) sf accu
     in
-    let accu =
-      FF.Map.fold
-        (fun ff _ accu -> aux accu ff)
-        (SAT.known_lazy_formulas env.satml) SE.empty
-    in
+    let accu = SAT.fold_known_lazy_formulas aux env.satml SE.empty in
     SE.union (atoms_from_lazy_sat ~frugal:true env)
       (*otherwise, we loose atoms that abstract internal axioms *)
-      (aux accu FF.vrai)
+      (aux FF.vrai accu)
     [@ocaml.ppwarning
       "improve terms / atoms extraction in lazy/non-lazy \
        and greedy/non-greedy mode. Separate atoms from terms !"]
@@ -853,8 +849,8 @@ module Make (Th : Theory.S) : Sat_solver_sig.S = struct
         in
         let nbv = FF.nb_made_vars env.ff_hcons_env in
         let cnf = SAT.new_vars env.satml ~nbv new_vars cnf in
-        (*update_lazy_cnf done inside assume at the right place *)
-        SAT.assume env.satml cnf f ~cnumber:0 activate ~dec_lvl;
+        (* update_lazy_cnf done inside assume at the right place *)
+        SAT.assume env.satml cnf f activate ~dec_lvl
       with
       | Satml.Unsat (lc) -> raise (IUnsat (env, make_explanation lc))
       | Satml.Sat -> assert false
