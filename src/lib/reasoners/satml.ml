@@ -930,6 +930,19 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       | Some a -> a
       | None -> assert false
 
+  let is_equality t =
+    match E.form_view t with
+    | Literal lit ->
+      begin match E.lit_view lit with
+        | Eq _ -> true
+        | _ -> false
+      end
+    | _ -> false
+
+  let is_equality_atom a =
+    match Shostak.Literal.view @@ Atom.literal a with
+    | LTerm t -> is_equality t
+    | LSem _ -> false
 
   (* [add_form_to_lazy_cnf env lazy_cnf ff] updates [env] and [lazy_cnf] by
      assuming the flat formula [ff].
@@ -972,7 +985,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           env.relevants <- SFF.add f_a env.relevants;
           match view f_a with
           | UNIT a ->
-            Queue.push a env.th_tableaux;
+            if not (is_equality_atom a) then
+              Queue.push a env.th_tableaux;
             ma
 
           | AND l ->
@@ -1008,7 +1022,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       Queue.push a env.th_tableaux;
       ma
 
-    | LTerm _ ->
+    | LTerm t ->
+      if is_equality t then
+        Queue.push a env.th_tableaux;
       try
         let parents, f_a = Matoms.find a ma in
         let ma = Matoms.remove a ma in
