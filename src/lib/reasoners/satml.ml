@@ -2087,6 +2087,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
              Vec.push env.vars v;
              assert (not (is_semantic v.pa));
              insert_var_order env v;
+             accu (*
              match th_entailed tenv0 v.pa with
              | None -> accu
              | Some (c, sz) ->
@@ -2095,7 +2096,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
                else unit_cnf, c :: nunit_cnf
                     [@ocaml.ppwarning
                       "Issue: BAD decision_level, in particular, \
-                       if minimal-bj is ON"]
+                       if minimal-bj is ON"] *)
           ) (unit_cnf, nunit_cnf) new_v
       in
       (* This assert is no longer true because some of the vars in the
