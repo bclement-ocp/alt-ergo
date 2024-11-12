@@ -761,55 +761,117 @@ let handle_patt_var id (DE.{ term_descr; _ } as term)  =
       "Expected a variable in a case match but got %a"
       DE.Term.print term
 
-(** Helper function to translate patterns in a pattern-matching from a Dolmen
-    Term.t to an Alt-Ergo Expr.t *)
-let mk_pattern DE.{ term_descr; _ } =
-  match term_descr with
-  | App (
-      { term_descr =
-          Cst ({ builtin = B.Constructor { adt; case; }; _ } as cst); _
-      }, _, pargs
-    ) ->
-    let vnames =
-      begin match DT.definition adt with
-        | Some (Adt { cases; _ }) ->
-          let { DE.dstrs; _ } = cases.(case) in
-          Array.fold_right (
-            fun v acc ->
-              match v with
-              | Some dstr -> dstr :: acc
-              | _ -> assert false
-          ) dstrs []
-        | _ ->
-          Fmt.failwith
-            "Expected a constructor for an algebraic data type but got\
-             something else for the definition of: %a"
-            DE.Ty.Const.print adt
-      end
+module Match : sig
+  type pat
+  (** Type used as an intermediate description of patterns during the
+      match compilation. *)
+
+  val mk_pat : DE.term -> pat
+  (** Convert Dolmen pattern into the intermediate description. *)
+
+  val make : Expr.t -> (pat * Expr.t) list -> Expr.t
+  (** [make e l] compiles into ite expressions the match of the expression [e]
+      against the patterns of the branches [l]. *)
+end = struct
+  type pat =
+    | Var of Var.t
+    | Constr of DE.term_cst * (Var.t * DE.term_cst * Ty.t) list
+
+  (** Helper function to translate patterns in a pattern-matching from a Dolmen
+      Term.t to an Alt-Ergo Expr.t *)
+  let mk_pat DE.{ term_descr; _ } =
+    match term_descr with
+    | App (
+        { term_descr =
+            Cst ({ builtin = B.Constructor { adt; case; }; _ } as cst); _
+        }, _, pargs
+      ) ->
+      let vnames =
+        begin match DT.definition adt with
+          | Some (Adt { cases; _ }) ->
+            let { DE.dstrs; _ } = cases.(case) in
+            Array.fold_right (
+              fun v acc ->
+                match v with
+                | Some dstr -> dstr :: acc
+                | _ -> assert false
+            ) dstrs []
+          | _ ->
+            Fmt.failwith
+              "Expected a constructor for an algebraic data type but got\
+               something else for the definition of: %a"
+              DE.Ty.Const.print adt
+        end
+      in
+      let rev_args =
+        List.fold_left2 (
+          fun acc rn arg ->
+            let v, n, ty = handle_patt_var rn arg in
+            (v, n, ty) :: acc
+        ) [] vnames pargs
+      in
+      Constr (cst, List.rev rev_args)
+
+    | Cst ({ builtin = B.Constructor _; _ } as cst) ->
+      Constr (cst, [])
+
+    | Var ({ builtin = B.Base; path; _ } as t_v) ->
+      (* Should the type be passed as an argument
+         instead of re-evaluating it here? *)
+      let v = Var.of_string (get_basename path) in
+      let sy = Sy.var v in
+      Cache.store_sy t_v sy;
+      (* Adding the matched variable to the store *)
+      Var v
+
+    | _ -> assert false
+
+  let rec compile mk_destr mk_tester e cases accu =
+    match cases with
+    | [] -> accu
+
+    | (Var x, p) :: _ ->
+      E.apply_subst (Var.Map.singleton x e, Ty.esubst) p
+
+    | (Constr (name, args), p) :: l ->
+      let _then =
+        List.fold_left
+          (fun acc (var, destr, ty) ->
+             let destr = mk_destr destr in
+             let d = E.mk_term destr [e] ty in
+             E.mk_let var d acc
+          ) p args
+      in
+      match l with
+        [] -> _then
+      | _ ->
+        let _else = compile mk_destr mk_tester e l accu in
+        let cond = mk_tester name e in
+        E.mk_ite cond _then _else
+
+  let make e cases =
+    let ty = E.type_info e in
+    let mk_destr =
+      match ty with
+      | Ty.Tadt _ -> (fun hs -> Sy.destruct hs)
+      | Ty.Trecord _ -> (fun hs -> Sy.Op (Sy.Access hs))
+      | _ -> assert false
     in
-    let rev_args =
-      List.fold_left2 (
-        fun acc rn arg ->
-          let v, n, ty = handle_patt_var rn arg in
-          (v, n, ty) :: acc
-      ) [] vnames pargs
+    let mk_tester =
+      match ty with
+      | Ty.Tadt _ -> E.mk_tester
+      | Ty.Trecord _ ->
+        (* no need to test for records *)
+        (fun _e _name -> assert false)
+      | _ -> assert false
     in
-    let args = List.rev rev_args in
-    Typed.Constr {name = cst; args}
-
-  | Cst ({ builtin = B.Constructor _; _ } as cst) ->
-    Typed.Constr {name = cst; args = []}
-
-  | Var ({ builtin = B.Base; path; _ } as t_v) ->
-    (* Should the type be passed as an argument
-       instead of re-evaluating it here? *)
-    let v = Var.of_string (get_basename path) in
-    let sy = Sy.var v in
-    Cache.store_sy t_v sy;
-    (* Adding the matched variable to the store *)
-    Typed.Var v
-
-  | _ -> assert false
+    let res = compile mk_destr mk_tester e cases e in
+    (*     debug_compile_match e cases res; *)
+    res
+    [@ocaml.ppwarning "TODO: introduce a let if e is a big expr"]
+    [@ocaml.ppwarning "TODO: add other elim schemes"]
+    [@ocaml.ppwarning "TODO: add a match construct in expr"]
+end
 
 let arith_ty = function
   | `Int -> Ty.Tint
@@ -1367,12 +1429,12 @@ let rec mk_expr
         let pats =
           List.rev_map (
             fun (p, t) ->
-              let patt = mk_pattern p in
+              let patt = Match.mk_pat p in
               let e = aux_mk_expr t in
               patt, e
           ) (List.rev pats)
         in
-        E.mk_match e pats
+        Match.make e pats
 
       | Binder ((Let_par ls | Let_seq ls) as let_binder, body) ->
         let lsbis =
