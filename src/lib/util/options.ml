@@ -175,7 +175,6 @@ let debug_types = ref false
 let debug_uf = ref false
 let debug_unsat_core = ref false
 let debug_use = ref false
-let debug_warnings = ref false
 let debug_commands = ref false
 let debug_optimize = ref false
 let rule = ref (-1)
@@ -204,7 +203,6 @@ let set_debug_types b = debug_types := b
 let set_debug_uf b = debug_uf := b
 let set_debug_unsat_core b = debug_unsat_core := b
 let set_debug_use b = debug_use := b
-let set_debug_warnings b = debug_warnings := b
 let set_debug_commands b = debug_commands := b
 let set_debug_optimize b = debug_optimize := b
 let set_rule b = rule := b
@@ -233,7 +231,6 @@ let get_debug_types () = !debug_types
 let get_debug_uf () = !debug_uf
 let get_debug_unsat_core () = !debug_unsat_core
 let get_debug_use () = !debug_use
-let get_debug_warnings () = !debug_warnings
 let get_debug_commands () = !debug_commands
 let get_debug_optimize () = !debug_optimize
 let get_rule () = !rule
@@ -361,7 +358,6 @@ let get_timelimit_per_goal () = !timelimit_per_goal
 let interpretation = ref INone
 let strict_mode = ref false
 let dump_models = ref false
-let interpretation_use_underscore = ref false
 let objectives_in_interpretation = ref false
 let output_format = ref Native
 let model_type = ref Value
@@ -371,7 +367,6 @@ let unsat_core = ref false
 let set_interpretation b = interpretation := b
 let set_strict_mode b = strict_mode := b
 let set_dump_models b = dump_models := b
-let set_interpretation_use_underscore b = interpretation_use_underscore := b
 let set_objectives_in_interpretation b = objectives_in_interpretation := b
 let set_output_format b = output_format := b
 let set_model_type t = model_type := t
@@ -400,7 +395,6 @@ let get_dump_models () = !dump_models
 let get_first_interpretation () = equal_mode !interpretation IFirst
 let get_every_interpretation () = equal_mode !interpretation IEvery
 let get_last_interpretation () = equal_mode !interpretation ILast
-let get_interpretation_use_underscore () = !interpretation_use_underscore
 let get_objectives_in_interpretation () = !objectives_in_interpretation
 let get_output_format () = !output_format
 let get_output_smtlib () =
