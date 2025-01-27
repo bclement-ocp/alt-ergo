@@ -1,5 +1,10 @@
 (set-info :smt-lib-version 2.6)
 (set-option :reproducible-resource-limit 1)
+; We want this test to loop during assertions, which it only does
+; if we are trying to generate a model.
+; This is somewhat brittle though and we should probably switch to a better
+; behaving looping problem.
+(set-option :produce-models true)
 (set-logic QF_BV)
 (set-info :source |
  Patrice Godefroid, SAGE (systematic dynamic test generation)
