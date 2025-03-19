@@ -3100,8 +3100,14 @@ module BV = struct
       (bvnot (bvlshr (bvnot s) t))
 
   (* Comparisons *)
-  let bvult s t = mk_builtin ~is_pos:false BVULE [t; s]
-  let bvule s t = mk_builtin ~is_pos:true BVULE [s; t]
+  let bvult s t =
+    Core.and_
+      (mk_builtin ~is_pos:false BVULE [t; s])
+      Ints.(bv2nat s < bv2nat t)
+  let bvule s t =
+    Core.and_
+      (mk_builtin ~is_pos:true BVULE [s; t])
+      Ints.(bv2nat s <= bv2nat t)
   let bvugt s t = bvult t s
   let bvuge s t = bvule t s
   let bvslt s t =

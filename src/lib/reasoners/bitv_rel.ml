@@ -232,6 +232,8 @@ module Affine = struct
 
     val map_constant : (constant -> constant) -> t -> t
 
+    val map_coefficients : (constant -> constant) -> t -> t
+
     type monomial
 
     val fold :
@@ -334,6 +336,10 @@ module Affine = struct
 
     let map_constant fn a =
       { const = fn a.const
+      ; coeffs = a.coeffs }
+
+    let map_coefficients fn a =
+      { const = a.const
       ; coeffs = X.Map.filter_map (fun _ k -> simplify (fn k)) a.coeffs }
 
     let fold ~constant ~coeff { const ; coeffs } =
@@ -439,7 +445,8 @@ let rec bv2poly uf t =
 let bv2poly uf t =
   let p = bv2poly uf t in
   let sz = match Expr.type_info t with Tbitv n -> n | _ -> assert false in
-  let p = IntPolynomial.map_constant (fun n -> Z.signed_extract n 0 sz) p in
+  let p = IntPolynomial.map_constant (fun n -> Z.extract n 0 sz) p in
+  let p = IntPolynomial.map_coefficients (fun n -> Z.signed_extract n 0 sz) p in
   p
 
 module Interner = struct
