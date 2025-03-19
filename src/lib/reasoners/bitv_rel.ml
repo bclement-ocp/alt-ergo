@@ -2384,7 +2384,8 @@ let simplify_all uf eqs touched (dom, idom) =
     in
     let acts =
       { acts_add_eq
-      ; acts_add_constraint } in
+      ; acts_add_constraint }
+    in
     if Propagator.simplify uf c acts then
       let c = explained ~ex:c_ex c in
       (Bitlist_domains.unwatch c dom, Interval_domains.unwatch c idom)
