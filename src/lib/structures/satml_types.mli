@@ -156,9 +156,8 @@ module type FLAT_FORMULA = sig
   val simplify :
     hcons_env ->
     Expr.t ->
-    (Expr.t -> t * 'a) ->
     Atom.var list ->
-    t * (Expr.t * (t * Atom.atom)) list
+    t * Expr.t list
     * Atom.var list
 
   val get_proxy_of : t -> proxies -> Atom.atom option

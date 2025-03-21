@@ -696,6 +696,11 @@ let pp_binders ppf =
 
 (** different views of an expression *)
 
+let neg t =
+  match t with
+  | { ty = Ty.Tbool; neg = Some n; _ } -> n
+  | { f = _; _ } -> assert false
+
 let lit_view t =
   let { f; xs; ty; _ } = t in
   if ty != Ty.Tbool then
@@ -703,6 +708,8 @@ let lit_view t =
       print t
   else
     match f with
+    | Sy.Form F_Lemma -> Pred (t, false)
+    | Sy.Form F_Skolem -> Pred (neg t, true)
     | Sy.Form _  ->
       Fmt.failwith "Calling lit_view on a formula %a" print t
     | Sy.Lit lit ->
@@ -780,11 +787,6 @@ let rec is_positive e =
   | Sy.Form (Sy.F_Clause _ | Sy.F_Skolem | Sy.F_Xor), _ -> false
   | Sy.Let, B_let { in_e; is_bool = true; _ } -> is_positive in_e
   | _ -> true
-
-let neg t =
-  match t with
-  | { ty = Ty.Tbool; neg = Some n; _ } -> n
-  | { f = _; _ } -> assert false
 
 let is_int t = t.ty == Ty.Tint
 let is_real t = t.ty == Ty.Treal
@@ -1610,6 +1612,7 @@ let rec sub_terms acc e =
   | _ -> List.fold_left sub_terms (TSet.add e acc) e.xs
 
 let args_of_lit e = match e.f with
+  | Sy.Form (F_Lemma | F_Skolem) -> []
   | Sy.Form _ -> assert false
   | Sy.Lit _ -> e.xs
   | _ when e.ty == Ty.Tbool -> [e]

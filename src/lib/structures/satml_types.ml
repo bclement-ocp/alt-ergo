@@ -467,9 +467,8 @@ module type FLAT_FORMULA = sig
   val simplify :
     hcons_env ->
     E.t ->
-    (E.t -> t * 'a) ->
     Atom.var list ->
-    t * (E.t * (t * Atom.atom)) list
+    t * E.t list
     * Atom.var list
 
   val get_proxy_of : t -> proxies -> Atom.atom option
@@ -887,26 +886,22 @@ module Flat_Formula : FLAT_FORMULA = struct
 
   (* translation from E.t *)
 
-  let abstract_lemma hcons abstr (f: E.t) tl lem new_vars =
-    try fst (abstr f)
-    with Not_found ->
-    try fst (snd (List.find (fun (x,_) -> E.equal f x) !lem))
-    with Not_found ->
-      if tl then begin
-        lem := (f, (vrai, Atom.vrai_atom)) :: !lem;
-        vrai
-      end
-      else
-        let lit = E.fresh_name Ty.Tbool in
-        let xlit, new_v = mk_lit hcons lit !new_vars in
-        let at_lit, new_v = Atom.add_expr_atom hcons.atoms lit new_v in
-        new_vars := new_v;
-        lem := (f, (xlit, at_lit)) :: !lem
-               [@ocaml.ppwarning "xlit or at_lit is probably redundant"]
-        ;
-        xlit
+  let abstract_lemma hcons (f: E.t) tl lem new_vars =
+    (* CR bclement: consider de-duplicating lemmas using De Bruijn variables
+       and creating atoms even for top-level formulas. *)
+    if List.exists (fun x -> E.equal f x) !lem then
+      Atom.vrai_atom
+    else
+    if tl then begin
+      lem := f :: !lem;
+      Atom.vrai_atom
+    end
+    else
+      let at_lit, new_v = Atom.add_expr_atom hcons.atoms f !new_vars in
+      new_vars := new_v;
+      at_lit
 
-  let simplify hcons f abstr new_vars =
+  let simplify hcons f new_vars =
     let lem = ref [] in
     let new_vars = ref new_vars in
     let rec simp topl ~parent_disj f =
@@ -916,7 +911,9 @@ module Flat_Formula : FLAT_FORMULA = struct
         new_vars := l;
         ff
 
-      | E.Lemma _   -> abstract_lemma hcons abstr f topl lem new_vars
+      | E.Lemma _   ->
+        let at_lit = abstract_lemma hcons f topl lem new_vars in
+        make hcons (UNIT at_lit) (UNIT at_lit.Atom.neg)
 
       | E.Skolem _ ->
         mk_not (simp false ~parent_disj:false (E.neg f))
