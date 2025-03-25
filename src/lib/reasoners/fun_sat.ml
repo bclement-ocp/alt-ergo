@@ -136,7 +136,7 @@ module Make (Th : Theory.S) = struct
     nb_related_to_both : int;
     nb_unrelated : int;
     tcp_cache : Th_util.answer ME.t;
-    delta : (E.gformula * E.gformula * Ex.t) list;
+    delta : (E.gformula * E.gformula list * Ex.t) list;
     decisions : int ME.t;
     dlevel : int;
     plevel : int;
@@ -311,13 +311,13 @@ module Make (Th : Theory.S) = struct
           "backjump: at level (%d, %d), I ignore the case %a"
           env.dlevel env.plevel E.print f
 
-    let elim _ _ =
+    let elim () =
       if Options.(get_debug_sat () && get_verbose ()) then
         print_dbg
           ~module_name:"Fun_sat" ~function_name:"elim"
           "elim"
 
-    let red _ _ =
+    let red () =
       if Options.(get_debug_sat () && get_verbose ()) then
         print_dbg
           ~module_name:"Fun_sat" ~function_name:"red"
@@ -577,79 +577,90 @@ module Make (Th : Theory.S) = struct
 
   (* currently:
      => this is not done modulo theories
-     => unit_facts_cache not taken into account *)
-  let update_distances =
-    let aux gf ff =
-      let gdist = max ff.E.gdist gf.E.gdist in
-      let hdist = max ff.E.hdist gf.E.hdist in
-      let gdist = if gdist < 0 then gdist else gdist + 1 in
-      let hdist = if hdist < 0 then hdist else hdist + 1 in
-      {gf with E.gdist; hdist}
-    in
-    fun env gf red ->
-      let nf = E.neg red in
-      try let ff, _ = ME.find nf !(env.unit_facts_cache) in aux gf ff
-      with Not_found ->
-      try let ff, _, _, _ = ME.find nf env.gamma in aux gf ff
-      with Not_found -> gf
+     => unit_facts_cache not taken into account
 
+     bclement: units_facts_cache seems to be taken into account? *)
+  let update_distances' =
+    let aux (gdist, hdist) ff =
+      (max gdist ff.E.gdist, max hdist ff.E.hdist)
+    in
+    fun env dist red ->
+      let nf = E.neg red in
+      try let ff, _ = ME.find nf !(env.unit_facts_cache) in aux dist ff
+      with Not_found ->
+      try let ff, _, _, _ = ME.find nf env.gamma in aux dist ff
+      with Not_found -> dist
 
 
   let do_bcp env tcp tcp_cache tmp_cache delta acc =
     let tcp = tcp && not (Options.get_no_tcp ()) in
     List.fold_left
       (fun (cl,u)
-        ((({ E.ff = f1; _ } as gf1), ({ E.ff = f2; _ } as gf2), d) as fd) ->
-        Debug.elim gf1 gf2;
-        if b_elim f1 env || b_elim f2 env then (cl,u)
+        ((gf1, gfN, d) as fd) ->
+        Debug.elim ();
+        if List.exists (fun gf -> b_elim gf.Expr.ff env) (gf1 :: gfN)
+        then
+          (cl, u)
         else
           try
             if not tcp then raise Exit;
-            assert (gf1.E.theory_elim == gf2.E.theory_elim);
+            assert (
+              List.for_all
+                (fun gf -> Bool.equal gf1.E.theory_elim gf.E.theory_elim)
+                gfN
+            );
+            let elim =
+              List.filter_map (fun gf ->
+                match th_elim tcp_cache tmp_cache gf env with
+                | Unknown -> None
+                | Entailed { ex; _ } -> Some (gf, Ex.union d ex)
+              ) (gf1 :: gfN)
+            in
             let u =
-              match th_elim tcp_cache tmp_cache gf1 env,
-                    th_elim tcp_cache tmp_cache gf2 env with
-              | Unknown, Unknown -> raise Exit
-              | Entailed _, _ | _, Entailed _ when gf1.E.theory_elim -> u
-
-              | Entailed _, Entailed _ ->
-                u (* eliminate if both are true ? why ? *)
-              (*(gf1, Ex.union d d1) :: (gf2, Ex.union d d2) :: u*)
-
-              | Entailed { ex = d1; _ }, _ -> (gf1, Ex.union d d1) :: u
-
-              | _, Entailed { ex = d2; _ } -> (gf2, Ex.union d d2) :: u
+              match elim with
+              | [] -> raise Exit
+              | _ :: _ ->
+                if gf1.E.theory_elim then u
+                else List.rev_append elim u
             in
             cl, u
           with Exit ->
             begin
-              Debug.red gf1 gf2;
+              Debug.red ();
               match
-                red tcp_cache tmp_cache gf1 env tcp,
-                red tcp_cache tmp_cache gf2 env tcp
+                List.fold_left
+                  (fun (unknown, gex, all_classes, nb, nt, dist) gf ->
+                    (* NB: [red] returns [Entailed] if [gf] is false. *)
+                    match red tcp_cache tmp_cache gf env tcp with
+                    | Unknown, _ -> (
+                      match unknown with
+                      | Some _ -> raise Exit
+                      | None -> Some gf, gex, all_classes, nb, nt, dist
+                    )
+                    | Entailed { ex; classes }, b ->
+                      let gex = Ex.union gex ex in
+                      let all_classes = List.rev_append classes all_classes in
+                      let nb = if b then nb + 1 else nb in
+                      let nt = if b then nt else nb +1 in
+                      let dist = update_distances' env dist gf.E.ff in
+                      unknown, gex, all_classes, nb, nt, dist
+                  ) (None, d, [], 0, 0, (-1, -1)) (gf1 :: gfN)
               with
-              | (Entailed { ex = d1; classes = c1 }, b1),
-                (Entailed { ex = d2; classes = c2 }, b2) ->
-                if Options.get_profiling() then Profiling.bcp_conflict b1 b2;
-                let expl = Ex.union (Ex.union d d1) d2 in
-                let c = List.rev_append c1 c2 in
-                raise (Ex.Inconsistent (expl, c))
-
-              | (Entailed { ex = d1; _ }, b), (Unknown, _) ->
-                if Options.get_profiling() then Profiling.red b;
-                let gf2 =
-                  {gf2 with E.nb_reductions = gf2.E.nb_reductions + 1} in
-                let gf2 = update_distances env gf2 f1 in
-                cl, (gf2,Ex.union d d1) :: u
-
-              | (Unknown, _) , (Entailed { ex = d2; _ }, b) ->
-                if Options.get_profiling() then Profiling.red b;
-                let gf1 =
-                  {gf1 with E.nb_reductions = gf1.E.nb_reductions + 1} in
-                let gf1 = update_distances env gf1 f2 in
-                cl, (gf1,Ex.union d d2) :: u
-
-              | (Unknown, _) , (Unknown, _) -> fd::cl , u
+              | None, ex, classes, nb, nt, _dist ->
+                Profiling.bcp_conflict (nb > 0) (nt <= 0);
+                raise (Ex.Inconsistent (ex, classes))
+              | Some gf, ex, _classes, nb, nt, (gdist, hdist) ->
+                for _ = 0 to nb - 1 do Profiling.red true done;
+                for _ = 0 to nt - 1 do Profiling.red false done;
+                let gf = { gf with E.nb_reductions = gf.E.nb_reductions + 1 } in
+                let gdist = max gf.E.gdist gdist in
+                let hdist = max gf.E.hdist hdist in
+                let gdist = if gdist < 0 then gdist else gdist + 1 in
+                let hdist = if hdist < 0 then hdist else hdist + 1 in
+                let gf = { gf with E.gdist; hdist } in
+                cl, (gf, ex) :: u
+              | exception Exit ->
+                fd :: cl, u
             end
       ) acc delta
 
@@ -795,12 +806,16 @@ module Make (Th : Theory.S) = struct
             let lst = List.map (fun f -> {ff with E.ff = f }, dep) fs in
             asm_aux (env, true, tcp, ap_delta, lits) lst
 
-          | E.Clause(f1,f2,is_impl) ->
-            assert is_impl;
+          | E.Clause (ps, qs) -> (
             Options.tool_req 2 "TR-Sat-Assume-C";
-            let p1 = {ff with E.ff=f1} in
-            let p2 = {ff with E.ff=f2} in
-            env, true, tcp, (p1,p2,dep)::ap_delta, lits
+            let ps = List.rev_map (fun p -> { ff with E.ff = E.neg p }) ps in
+            let qs = List.map (fun q -> { ff with E.ff = q }) qs in
+            let ps = List.rev_append ps qs in
+            match ps with
+            | [] -> assert false
+            | f :: fs ->
+              env, true, tcp, (f,fs,dep)::ap_delta, lits
+          )
 
           | E.Lemma _ ->
             Options.tool_req 2 "TR-Sat-Assume-Ax";
@@ -1111,45 +1126,55 @@ module Make (Th : Theory.S) = struct
     if Options.get_no_sat_learning() then None
     else
       let cache = !(env.unit_facts_cache) in
-      let in_cache f =
-        try Some (snd (ME.find f cache))
-        with Not_found -> None
+      let in_cache f : Th_util.answer =
+        try Entailed { ex = snd (ME.find f cache) ; classes = [] }
+        with Not_found -> Unknown
       in
       let prop, delt =
         List.fold_left
-          (fun (prop, new_delta) ((gf1, gf2, d) as e) ->
-             let { E.ff = f1; _ } = gf1 in
-             let { E.ff = f2; _ } = gf2 in
-             let nf1 = E.neg f1 in
-             let nf2 = E.neg f2 in
-             match in_cache nf1, in_cache nf2 with
-             | Some d1, Some d2 ->
-               if Options.get_profiling() then Profiling.bcp_conflict true true;
-               let expl = Ex.union (Ex.union d d1) d2 in
-               raise (IUnsat (expl, []))
-
-             | Some d1, _ ->
-               (* a is false, so b should be true *)
-               if Options.get_profiling() then Profiling.red true;
-               let not_gf1 = {gf1 with E.ff = nf1} in
-               let gf2 =
-                 {gf2 with E.nb_reductions = gf2.E.nb_reductions + 1} in
-               let gf2 = update_distances env gf2 f1 in
-               (gf2, Ex.union d d1) :: (not_gf1, d1) :: prop, new_delta
-
-             | _, Some d2 ->
-               (* b is false, so a should be true *)
-               let not_gf2 = {gf2 with E.ff = nf2} in
-               let gf1 =
-                 {gf1 with E.nb_reductions = gf1.E.nb_reductions + 1} in
-               let gf1 = update_distances env gf1 f2 in
-               (gf1, Ex.union d d2) :: (not_gf2, d2) :: prop, new_delta
-
-             | None, None ->
-               match in_cache f1, in_cache f2 with
-               | None, None     -> prop, e :: new_delta
-               | Some d1, _    -> (gf1, d1) :: prop, new_delta
-               | None, Some d2 -> (gf2, d2) :: prop, new_delta
+          (fun (prop, new_delta) ((gf1, gfN, d) as e) ->
+             match
+               List.fold_left (fun (unknown, gex, prop, dist) gf ->
+                 let nf = E.neg gf.E.ff in
+                 match in_cache nf with
+                 | Entailed { ex; _ } ->
+                   (* ex => nf *)
+                   let not_gf = { gf with E.ff = nf } in
+                   let dist = update_distances' env dist gf.E.ff in
+                   unknown, Ex.union ex gex, (not_gf, ex) :: prop, dist
+                 | Unknown -> (
+                   match unknown with
+                   | None -> Some gf, gex, prop, dist
+                   | Some _ -> raise Exit
+                 )
+                ) (None, d, prop, (0, 0)) (gf1 :: gfN)
+              with
+              | None, ex, _, _dist ->
+                (* all disjuncts are false => conflict *)
+                Profiling.bcp_conflict true true;
+                raise (IUnsat (ex, []))
+              | Some gf, ex, prop, (gdist, hdist) ->
+                (* all disjunct but one are false => reduction *)
+                Profiling.red true;
+                let gf = { gf with E.nb_reductions = gf.E.nb_reductions + 1 } in
+                let gdist = max gf.E.gdist gdist in
+                let hdist = max gf.E.hdist hdist in
+                let gdist = if gdist < 0 then gdist else gdist + 1 in
+                let hdist = if hdist < 0 then hdist else hdist + 1 in
+                let gf = { gf with E.gdist; hdist } in
+                (gf, ex) :: prop, new_delta
+              | exception Exit ->
+                (* NB: do not simplify so that reductions are properly counted. *)
+                match
+                  Compat.List.find_map
+                    (fun gf ->
+                      match in_cache gf.E.ff with
+                      | Entailed { ex; _ } -> Some (gf, ex)
+                      | Unknown -> None)
+                    (gf1 :: gfN)
+                with
+                | Some (gf, ex) -> (gf, ex) :: prop, new_delta
+                | None -> prop, e :: new_delta
           )([], []) env.delta
       in
       match prop with [] -> None | _ -> Some (prop, delt)
@@ -1217,6 +1242,12 @@ module Make (Th : Theory.S) = struct
       end;
       let not_a = {a with E.ff = E.neg f} in
       if Options.get_sat_learning () then learn_clause env not_a dep';
+      let hyp, l =
+        match b with
+        | [] -> assert false
+        | [ b ] -> [b, Ex.union d dep'], l
+        | b :: c -> [], (b, c, Ex.union d dep') :: l
+      in
       let env = {env with delta=l} in
       (* in the section below, we try to backjump further with latest
           generated instances if any *)
@@ -1230,7 +1261,7 @@ module Make (Th : Theory.S) = struct
           (*No backtrack, reset cache*)
           ignore (update_instances_cache (Some []));
       end;
-      unsat_rec (assume env [b, Ex.union d dep']) (not_a,dep') false
+      unsat_rec (assume env hyp) (not_a,dep') false
     with Not_found ->
       Debug.backjumping (E.neg f) env;
       Options.tool_req 2 "TR-Sat-Backjumping";
