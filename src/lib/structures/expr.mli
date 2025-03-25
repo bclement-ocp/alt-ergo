@@ -169,8 +169,8 @@ type lit_view = private
   | Pred of t * bool
 
 type form_view = private
-  | Unit of t*t  (* unit clauses *)
-  | Clause of t*t*bool      (* a clause (t1 or t2) bool <-> is implication *)
+  | Unit of t list
+  | Clause of t list * t list (* a clause p1 -> ... -> pn -> q1 \/ ... \/ qm *)
   | Iff of t * t
   | Xor of t * t
   | Literal of t   (* an atom *)

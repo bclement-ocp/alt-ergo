@@ -347,7 +347,8 @@ module Make(X : Theory.S) : S with type tbox = X.t = struct
 
   let sort_facts =
     let rec size f = match Expr.form_view f with
-      | E.Unit(f1,f2) -> max (size f1) (size f2)
+      | E.Unit fs ->
+        List.fold_left (fun acc f -> max acc (size f)) 0 fs
       | E.Lemma _ | E.Clause _ | E.Literal _ | E.Skolem _
       | E.Let _ | E.Iff _ | E.Xor _ -> E.size f
     in

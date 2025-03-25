@@ -918,25 +918,36 @@ module Flat_Formula : FLAT_FORMULA = struct
       | E.Skolem _ ->
         mk_not (simp false ~parent_disj:false (E.neg f))
 
-      | E.Unit(f1, f2) ->
-        let x1 = simp topl ~parent_disj:false f1 in
-        let x2 = simp topl ~parent_disj:false f2 in
-        begin match x1.view , x2.view with
-          | AND l1, AND l2 -> mk_and hcons (List.rev_append l1 l2)
-          | AND l1, _      -> mk_and hcons (x2 :: l1)
-          | _     , AND l2 -> mk_and hcons (x1 :: l2)
-          | _              -> mk_and hcons [x1; x2]
-        end
+      | E.Unit fs ->
+        let args =
+          List.fold_left (fun acc f ->
+            let x = simp topl ~parent_disj:false f in
+            match x.view with
+            | AND l -> List.rev_append l acc
+            | _ -> x :: acc
+          ) [] fs
+        in
+        mk_and hcons args
 
-      | E.Clause(f1, f2, _) ->
-        let x1 = simp false ~parent_disj:true f1 in
-        let x2 = simp false ~parent_disj:true f2 in
-        begin match x1.view, x2.view with
-          | OR l1, OR l2 -> mk_or hcons (List.rev_append l1 l2)
-          | OR l1, _     -> mk_or hcons (x2 :: l1)
-          | _    , OR l2 -> mk_or hcons (x1 :: l2)
-          | _            -> mk_or hcons [x1; x2]
-        end
+      | E.Clause (ps, qs) ->
+        (* p1 -> ... -> pn -> q1 \/ ... \/ qn *)
+        let args =
+          List.fold_left (fun acc p ->
+            let x = simp false ~parent_disj:true (E.neg p) in
+            match x.view with
+            | OR l -> List.rev_append l acc
+            | _ -> x :: acc
+          ) [] ps
+        in
+        let args =
+          List.fold_left (fun acc q ->
+            let x = simp false ~parent_disj:true q in
+            match x.view with
+            | OR l -> List.rev_append l acc
+            | _ -> x :: acc
+          ) args qs
+        in
+        mk_or hcons args
 
       | E.Iff(f1, f2) ->
         simp topl ~parent_disj @@

@@ -115,8 +115,8 @@ type lit_view =
   | Pred of t * bool
 
 type form_view =
-  | Unit of t*t  (* unit clauses *)
-  | Clause of t*t*bool      (* a clause (t1 or t2) bool <-> is implication *)
+  | Unit of t list (* unit clauses *)
+  | Clause of t list * t list (* a clause p1 -> ... -> pn -> q1 \/ ... \/ qm *)
   | Iff of t * t
   | Xor of t * t
   | Literal of t   (* an atom *)
@@ -725,14 +725,27 @@ let lit_view t =
       end
     | _ -> Pred(t, false)
 
+(* Converts p1 -> ... -> pn -> q1 \/ ... \/ qm
+   into ~p1 \/ ... \/ ~pn \/ q1 \/ ... \/ qm *)
+let iter_clause f ps qs =
+  List.iter (fun p -> f (neg p)) ps;
+  List.iter f qs
+
+let fold_clause f acc ps qs =
+  List.fold_left f
+    (List.fold_left (fun acc p -> f acc (neg p)) acc ps) qs
+
 let form_view t =
   let { f; xs; bind; _ } = t in
   if t.ty != Ty.Tbool then
     Fmt.failwith "Term %a is not a formula" print t
   else
     match f, xs, bind with
-    | Sy.Form (Sy.F_Unit _), [a;b], _ -> Unit (a, b)
-    | Sy.Form (Sy.F_Clause i), [a;b], _ -> Clause (a, b, i)
+    | Sy.Form (Sy.F_Unit _), ((_ :: _ :: _) as xs), _ -> Unit xs
+    | Sy.Form (Sy.F_Clause is_imp), [a;b], _ ->
+      (* a \/ b is ~a => b *)
+      if is_imp then Clause ([neg a], [b])
+      else Clause ([], [a; b])
     | Sy.Form Sy.F_Iff, [a;b], _ -> Iff(a, b)
     | Sy.Form Sy.F_Xor, [a;b], _ -> Xor(a, b)
     | Sy.Form Sy.F_Lemma, [], B_lemma lem -> Lemma lem
@@ -1524,7 +1537,8 @@ and find_particular_subst =
   let rec find_subst v tv f =
     match form_view f with
     | Unit _ | Lemma _ | Skolem _ | Let _ | Iff _ | Xor _ -> ()
-    | Clause(f1, f2,_) -> find_subst v tv f1; find_subst v tv f2
+    | Clause (ps, qs) ->
+      iter_clause (find_subst v tv) ps qs
     | Literal a ->
       match lit_view a with
       | Distinct [a;b] when
@@ -1640,7 +1654,11 @@ let atoms_rec_of_form =
 
     | Lemma { main = f; _ } | Skolem { main = f; _ } ->
       atoms only_ground acc f
-    | Unit(f1,f2) | Clause(f1,f2,_) | Iff (f1, f2) | Xor (f1, f2) ->
+    | Unit fs ->
+      List.fold_left (atoms only_ground) acc fs
+    | Clause (ps, qs) ->
+      fold_clause (atoms only_ground) acc ps qs
+    | Iff (f1, f2) | Xor (f1, f2) ->
       atoms only_ground (atoms only_ground acc f1) f2
     | Let { let_e; in_e; _ } ->
       let acc = atoms only_ground acc in_e in
@@ -1672,9 +1690,10 @@ let resolution_of_literal a binders free_vty acc =
 let rec resolution_of_disj is_back f binders free_vty acc =
   match form_view f with
   | Literal a -> resolution_of_literal a binders free_vty acc
-  | Clause(g,f, true) ->
-    if is_back then resolution_of_disj is_back f binders free_vty acc
-    else resolution_of_disj is_back g binders free_vty acc
+  | Clause (_, [q]) when is_back ->
+    resolution_of_disj is_back q binders free_vty acc
+  | Clause ([p], _) when not is_back ->
+    resolution_of_disj is_back (neg p) binders free_vty acc
   | Iff(f1, f2) ->
     resolution_of_disj is_back f2 binders free_vty @@
     resolution_of_disj is_back f1 binders free_vty acc
@@ -1683,19 +1702,22 @@ let rec resolution_of_disj is_back f binders free_vty acc =
 
 let rec resolution_of_toplevel_conj is_back f binders free_vty acc =
   match form_view f with
-  | Unit(f1, f2) ->
-    resolution_of_toplevel_conj is_back f2 binders free_vty
-      (resolution_of_toplevel_conj is_back f1 binders free_vty acc)
+  | Unit fs ->
+    List.fold_left
+      (fun acc f ->
+        resolution_of_toplevel_conj is_back f binders free_vty acc)
+      acc fs
   | _ -> resolution_of_disj is_back f binders free_vty acc
 
 let sub_terms_of_formula f =
   let rec aux f acc =
     match form_view f with
     | Literal a -> List.fold_left sub_terms acc (args_of_lit a)
-    | Unit(f1, f2)
+    | Unit fs -> List.fold_left (fun acc f -> aux f acc) acc fs
+    | Clause (ps, qs) ->
+      fold_clause (fun acc f -> aux f acc) acc ps qs
     | Iff(f1, f2)
-    | Xor(f1, f2)
-    | Clause(f1, f2, _) -> aux f2 (aux f1 acc)
+    | Xor(f1, f2) -> aux f2 (aux f1 acc)
     | Skolem q | Lemma q -> aux q.main acc
     | Let xx ->
       let acc = aux xx.in_e acc in

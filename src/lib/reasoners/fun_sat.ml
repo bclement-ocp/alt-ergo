@@ -569,9 +569,9 @@ module Make (Th : Theory.S) = struct
   let rec add_dep_of_formula f dep =
     let dep = add_dep f dep in
     match E.form_view f with
-    | E.Unit (f1, f2) ->
+    | E.Unit fs ->
       if not (Options.get_unsat_core ()) then dep
-      else add_dep_of_formula f2 (add_dep_of_formula f1 dep)
+      else List.fold_left (fun dep f -> add_dep_of_formula f dep) dep fs
     | E.Lemma _ | E.Clause _ | E.Literal _ | E.Skolem _
     | E.Let _ | E.Iff _ | E.Xor _ -> dep
 
@@ -790,9 +790,9 @@ module Make (Th : Theory.S) = struct
             let g = E.elim_iff f1 f2 ~with_conj:false |> E.neg in
             asm_aux (env, true, tcp, ap_delta, lits) [{ff with E.ff = g}, dep]
 
-          | E.Unit (f1, f2) ->
+          | E.Unit fs ->
             Options.tool_req 2 "TR-Sat-Assume-U";
-            let lst = [{ff with E.ff=f1},dep ; {ff with E.ff=f2},dep] in
+            let lst = List.map (fun f -> {ff with E.ff = f }, dep) fs in
             asm_aux (env, true, tcp, ap_delta, lits) lst
 
           | E.Clause(f1,f2,is_impl) ->
@@ -987,7 +987,7 @@ module Make (Th : Theory.S) = struct
     let rec aux f =
       match E.form_view f with
       | E.Literal _ -> true
-      | E.Unit(f1, f2) -> aux f1 && aux f2
+      | E.Unit fs -> List.for_all aux fs
       | E.Clause _ | E.Iff _ | E.Xor _ -> false
       | E.Lemma _ | E.Skolem _ | E.Let _ ->
         (*failwith "Not in current theory axioms"*)
