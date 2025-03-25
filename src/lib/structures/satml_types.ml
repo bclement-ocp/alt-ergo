@@ -929,23 +929,14 @@ module Flat_Formula : FLAT_FORMULA = struct
         in
         mk_and hcons args
 
-      | E.Clause (ps, qs) ->
-        (* p1 -> ... -> pn -> q1 \/ ... \/ qn *)
+      | E.Clause (_, fs) ->
         let args =
-          List.fold_left (fun acc p ->
-            let x = simp false ~parent_disj:true (E.neg p) in
-            match x.view with
-            | OR l -> List.rev_append l acc
-            | _ -> x :: acc
-          ) [] ps
-        in
-        let args =
-          List.fold_left (fun acc q ->
+          Array.fold_left (fun acc q ->
             let x = simp false ~parent_disj:true q in
             match x.view with
             | OR l -> List.rev_append l acc
             | _ -> x :: acc
-          ) args qs
+          ) [] fs
         in
         mk_or hcons args
 

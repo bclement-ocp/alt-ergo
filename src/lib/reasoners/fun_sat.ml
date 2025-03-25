@@ -806,12 +806,11 @@ module Make (Th : Theory.S) = struct
             let lst = List.map (fun f -> {ff with E.ff = f }, dep) fs in
             asm_aux (env, true, tcp, ap_delta, lits) lst
 
-          | E.Clause (ps, qs) -> (
+          | E.Clause (_, fs) -> (
             Options.tool_req 2 "TR-Sat-Assume-C";
-            let ps = List.rev_map (fun p -> { ff with E.ff = E.neg p }) ps in
-            let qs = List.map (fun q -> { ff with E.ff = q }) qs in
-            let ps = List.rev_append ps qs in
-            match ps with
+            let fs = Array.map (fun q -> { ff with E.ff = q }) fs in
+            let fs = Array.to_list fs in
+            match fs with
             | [] -> assert false
             | f :: fs ->
               env, true, tcp, (f,fs,dep)::ap_delta, lits

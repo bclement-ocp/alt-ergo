@@ -170,7 +170,10 @@ type lit_view = private
 
 type form_view = private
   | Unit of t list
-  | Clause of t list * t list (* a clause p1 -> ... -> pn -> q1 \/ ... \/ qm *)
+  | Clause of int * t array
+    (* a clause p1 -> ... -> pn -> q1 \/ ... \/ qm
+
+       the first [n] are implications *)
   | Iff of t * t
   | Xor of t * t
   | Literal of t   (* an atom *)
