@@ -101,7 +101,7 @@ let is_ite =
   let ite = Symbols.Op Symbols.Tite in
   fun t ->
     match E.term_view t with
-    | { E.f ; xs = [p;t1;t2]; _ } when Symbols.equal f ite -> Some (p, t1, t2)
+    | { E.f ; xs; _ } when Symbols.equal f ite -> Some (E.Args.to_triple xs)
     | _ -> None
 
 let add_to_guarded p s t mp =

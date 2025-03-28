@@ -53,7 +53,7 @@ let union_tpl (x1,y1) (x2,y2) =
   Options.exec_thread_yield ();
   SE.union x1 x2, SA.union y1 y2
 
-let one, _ = X.make (E.mk_term (Symbols.name ~ns:Internal "@bottom") [] Ty.Tint)
+let one, _ = X.make (E.symbol (Symbols.name ~ns:Internal "@bottom") Ty.Tint)
 let leaves r =
   match X.leaves r with [] -> [one] | l -> l
 
@@ -65,7 +65,7 @@ let add_term k t mp =
 let up_add g t rt lvs =
   let g = if MX.mem rt g then g else MX.add rt (SE.empty, SA.empty) g in
   match E.term_view t with
-  | { E.xs = []; _ } -> g
+  | { E.xs; _ } when E.Args.is_empty xs -> g
   | _ -> List.fold_left (fun g x -> add_term x t g) g lvs
 
 let congr_add g lvs =

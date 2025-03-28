@@ -98,7 +98,7 @@ let fpa_rounding_mode_dty, d_constrs, fpa_rounding_mode =
     def, constrs
   in
   Nest.attach_orders [def];
-  let body = List.map (fun c -> c, []) d_constrs in
+  let body = List.map (fun c -> c, [| |]) d_constrs in
   let ty = Ty.t_adt ~body:(Some body) ty_cst [] in
   DE.Ty.apply ty_cst [], d_constrs, ty
 

@@ -416,17 +416,18 @@ module Shostak(X : ALIEN) = struct
       match E.term_view t with
       | { f = Bitv (_, s); ty = Tbitv size; _ } ->
         { descr = Vcte s; size }
-      | { f = Op Concat; xs = [ t1; t2 ]; ty = Tbitv size; _ } ->
+      | { f = Op Concat; xs; ty = Tbitv size; _ } ->
+        let t1, t2 = E.Args.to_pair xs in
         { descr = Vconcat (t1, t2); size }
-      | { f = Op (Sign_extend n) ; xs = [ t ] ; ty = Tbitv size; _ } ->
-        { descr = Vsign_extend (n, t); size }
-      | { f = Op (Repeat n) ; xs = [ t ] ; ty = Tbitv size; _ } ->
-        { descr = Vrepeat (n, t) ; size }
-      | { f = Op Extract (i, j); xs = [ t' ]; ty = Tbitv size; _ } ->
+      | { f = Op (Sign_extend n) ; xs ; ty = Tbitv size; _ } ->
+        { descr = Vsign_extend (n, E.Args.to_expr xs); size }
+      | { f = Op (Repeat n) ; xs ; ty = Tbitv size; _ } ->
+        { descr = Vrepeat (n, E.Args.to_expr xs) ; size }
+      | { f = Op Extract (i, j); xs; ty = Tbitv size; _ } ->
         assert (size = j - i + 1);
-        { descr = Vextract (t', i, j); size }
-      | { f = Op BVnot; xs = [ t ]; ty = Tbitv size; _ } ->
-        { descr = Vnot t; size }
+        { descr = Vextract (E.Args.to_expr xs, i, j); size }
+      | { f = Op BVnot; xs; ty = Tbitv size; _ } ->
+        { descr = Vnot (E.Args.to_expr xs); size }
       | { ty = Tbitv size; _ } ->
         { descr = Vother t; size }
       | _ -> assert false

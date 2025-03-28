@@ -57,7 +57,7 @@ let assume_nontrivial_eqs
    to the arguments is equal to the result (usually derived from the
    explanations from [Uf.find]). *)
 type delayed_fn =
-  Uf.t -> Symbols.operator -> Expr.t list -> (X.r * Explanation.t) option
+  Uf.t -> Symbols.operator -> Expr.args -> (X.r * Explanation.t) option
 
 let delay1 embed is_mine f uf op = function
   | [ t ] -> (
@@ -158,7 +158,7 @@ end = struct
               env, [L.Eq(r', r), ex]
           | None ->
             let used_by =
-              List.fold_left (fun used_by x ->
+              Expr.Args.fold_left (fun used_by x ->
                   MX.update (Uf.make uf x) (fun sm ->
                       let sm = Option.value ~default:OMap.empty sm in
                       Option.some @@

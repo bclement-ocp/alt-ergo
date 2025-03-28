@@ -687,9 +687,8 @@ let process_source ?selector_inst ~print_status src =
        - if not, check if the formula is in the environment.
     *)
     let simple_form =
-      Expr.mk_term
+      Expr.symbol
         (Sy.name name)
-        []
         (Translate.dty_to_ty term.DStd.Expr.term_ty)
     in
     match get_value simple_form with

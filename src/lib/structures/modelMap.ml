@@ -157,14 +157,14 @@ let empty ~suspicious declared_ids =
 let rec subst_in_term id e c =
   let Expr.{ f; xs; ty = ty'; _ } = Expr.term_view c in
   match f, xs with
-  | Sy.Name { hs = id'; _ }, [] when Id.equal id id' ->
+  | Sy.Name { hs = id'; _ }, _ when Id.equal id id' && Expr.Args.is_empty xs ->
     let ty = Expr.type_info e in
     if not @@ Ty.equal ty ty' then
       Errors.error (Model_error (Subst_type_clash (id, ty', ty)));
     e
   | _ ->
     begin
-      let xs = List.map (subst_in_term id e) xs in
+      let xs = Expr.Args.map (subst_in_term id e) xs in
       Expr.mk_term f xs ty'
     end
 

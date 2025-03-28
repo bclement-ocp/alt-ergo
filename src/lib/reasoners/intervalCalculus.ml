@@ -672,42 +672,38 @@ let calc_pow a b ty uf =
     | None -> None
   with Exit -> None
 
-let delayed_pow uf _op = function
-  | [ a; b ] -> calc_pow a b (E.type_info a) uf
-  | _ -> assert false
+let delayed_pow uf _op args =
+  let a, b = E.Args.to_pair args in
+  calc_pow a b (E.type_info a) uf
 
-let delayed_op1 ~ty fn uf _op = function
-  | [ x ] ->
-    let rx, exx = Uf.find uf x in
-    Option.bind (P.is_const (poly_of rx)) @@ fun cx ->
-    Some (alien_of (P.create [] (fn cx) ty), exx)
-  | _ -> assert false
+let delayed_op1 ~ty fn uf _op args =
+  let x = E.Args.to_expr args in
+  let rx, exx = Uf.find uf x in
+  Option.bind (P.is_const (poly_of rx)) @@ fun cx ->
+  Some (alien_of (P.create [] (fn cx) ty), exx)
 
-let delayed_op2 ~ty fn uf _op = function
-  | [ x; y ] ->
-    let rx, exx = Uf.find uf x in
-    let ry, exy = Uf.find uf y in
-    Option.bind (P.is_const (poly_of rx)) @@ fun cx ->
-    Option.bind (P.is_const (poly_of ry)) @@ fun cy ->
-    Some (alien_of (P.create [] (fn cx cy) ty), Ex.union exx exy)
-  | _ -> assert false
+let delayed_op2 ~ty fn uf _op args =
+  let x, y = E.Args.to_pair args in
+  let rx, exx = Uf.find uf x in
+  let ry, exy = Uf.find uf y in
+  Option.bind (P.is_const (poly_of rx)) @@ fun cx ->
+  Option.bind (P.is_const (poly_of ry)) @@ fun cy ->
+  Some (alien_of (P.create [] (fn cx cy) ty), Ex.union exx exy)
 
-let delayed_integer_log2 uf _op = function
-  | [ x ] -> (
-      let rx, exx = Uf.find uf x in
-      let px = poly_of rx in
-      match P.is_const px with
-      | None -> None
-      | Some cb ->
-        if Q.compare cb Q.zero <= 0 then None
-        else
-          let res =
-            alien_of @@
-            P.create [] (Q.from_int (Fpa_rounding.integer_log_2 cb)) Treal
-          in
-          Some (res, exx)
-    )
-  | _ -> assert false
+let delayed_integer_log2 uf _op args =
+  let x = E.Args.to_expr args in
+  let rx, exx = Uf.find uf x in
+  let px = poly_of rx in
+  match P.is_const px with
+  | None -> None
+  | Some cb ->
+    if Q.compare cb Q.zero <= 0 then None
+    else
+      let res =
+        alien_of @@
+        P.create [] (Q.from_int (Fpa_rounding.integer_log_2 cb)) Treal
+      in
+        Some (res, exx)
 
 (* These are the partially interpreted functions that we know how to compute.
    They will be computed immediately if possible, or as soon as we learn the
@@ -846,7 +842,8 @@ and update_monome are_eq expl use_x env x =
         let use_x = SX.singleton x in
         begin
           match E.term_view t with
-          | { E.f = (Sy.Op Sy.Div); xs = [a; b]; _ } ->
+          | { E.f = (Sy.Op Sy.Div); xs; _ } ->
+            let a, b = E.Args.to_pair xs in
             let ra, ea =
               let (ra, _) as e = Uf.find env.new_uf a in
               if List.filter (X.equal x) (X.leaves ra) == [] then e

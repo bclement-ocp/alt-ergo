@@ -70,7 +70,7 @@ type adt_constr =
   { constr : Dolmen.Std.Expr.term_cst ;
     (** constructor of an ADT type *)
 
-    destrs : (Dolmen.Std.Expr.term_cst * t) list
+    destrs : (Dolmen.Std.Expr.term_cst * t) array
     (** the list of destructors associated with the constructor and
         their respective types *)
   }
@@ -84,7 +84,7 @@ module Set : Set.S with type elt = t
 val assoc_destrs :
   Dolmen.Std.Expr.term_cst ->
   adt_constr list ->
-  (Dolmen.Std.Expr.term_cst * t) list
+  (Dolmen.Std.Expr.term_cst * t) array
 (** [assoc_destrs cons cases] returns the list of destructors associated with
     the constructor [cons] in the ADT defined by [cases].
     @raises Not_found if the constructor is not in the given list. *)
@@ -137,7 +137,7 @@ val text : t list -> Dolmen.Std.Expr.ty_cst -> t
 
 val t_adt :
   ?body:((Dolmen.Std.Expr.term_cst *
-          (Dolmen.Std.Expr.term_cst * t) list) list) option ->
+          (Dolmen.Std.Expr.term_cst * t) array) list) option ->
   Dolmen.Std.Expr.ty_cst ->
   t list ->
   t

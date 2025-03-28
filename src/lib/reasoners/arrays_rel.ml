@@ -188,17 +188,20 @@ let merge_revelant_terms (gets, tbset) (g, t) =
 let rec relevant_terms env t =
   let { E.f; xs; _ } = E.term_view t in
   let gets, tbset =
-    List.fold_left
+    E.Args.fold_left
       (fun acc x ->
          merge_revelant_terms acc (cached_relevant_terms env x)
       ) (G.empty, TBS.empty) xs
   in
-  match Sy.is_get f, Sy.is_set f, xs with
-  | true , false, [a;i]   -> G.add {g=t; gt=a; gi=i} gets, tbset
-  | false, true , [a;i;v] ->
+  if Sy.is_get f then (
+    assert (not (Sy.is_set f));
+    let a, i = E.Args.to_pair xs in
+    G.add {g=t; gt=a; gi=i} gets, tbset
+  ) else if Sy.is_set f then (
+    let a, i, v = E.Args.to_triple xs in
     gets, TBS.add a {s=t; st=a; si=i; sv=v} tbset
-  | false, false, _ -> (gets,tbset)
-  | _  -> assert false
+  ) else
+    gets, tbset
 
 and cached_relevant_terms env t =
   match H.find env.cached_relevant_terms t with
@@ -279,8 +282,8 @@ let get_of_set (module Uf : UF) uf gtype (env, acc) =
        else
          let env = {env with seen = Tmap.update get set env.seen} in
          let { E.f; xs; _ } = E.term_view set in
-         match Sy.is_set f, xs with
-         | true , [stab;si;sv] ->
+         if Sy.is_set f then
+          let stab, si, sv = E.Args.to_triple xs in
            let xi, _ = X.make gi in
            let xj, _ = X.make si in
            let get_stab  = E.ArraysEx.select stab gi in
@@ -297,7 +300,8 @@ let get_of_set (module Uf : UF) uf gtype (env, acc) =
              {env with new_terms =
                          E.Set.add get_stab env.new_terms } in
            update_env (module Uf) uf dep env acc gi si p p_ded n n_ded
-         | _ -> (env,acc)
+        else
+          (env,acc)
     ) (Uf.class_of uf gtab) (env,acc)
 
 (* Assume that [stype] represents the set term `(store b j v)`.
@@ -402,7 +406,7 @@ let extensionality accu la =
              let i  = E.fresh_name ty in
              let g1 = E.ArraysEx.select t1 i in
              let g2 = E.ArraysEx.select t2 i in
-             let d  = E.mk_distinct ~iff:false [g1;g2] in
+             let d  = E.mk_distinct ~iff:false (E.Args.of_pair (g1, g2)) in
              let acc = Conseq.add (d, dep) acc in
              let env =
                {env with new_terms =

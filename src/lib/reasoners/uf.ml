@@ -1203,14 +1203,14 @@ let compute_concrete_model_of_val cache =
     else
       begin
         let arg_vals, arg_tys, mrepr =
-          List.fold_left
-            (fun (arg_vals, arg_tys, mrepr) arg ->
+          E.Args.fold_right
+            (fun arg (arg_vals, arg_tys, mrepr) ->
                let rep_arg, mrepr = model_repr_of_term arg env mrepr in
                rep_arg :: arg_vals,
                (Expr.type_info arg) :: arg_tys,
                mrepr
             )
-            ([], [], mrepr) (List.rev xs)
+            xs ([], [], mrepr)
         in
         let ret_rep, mrepr = model_repr_of_term t env mrepr in
         match f, arg_vals, ty with

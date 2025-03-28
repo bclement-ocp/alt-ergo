@@ -226,7 +226,8 @@ module Make (X : Sig.X) = struct
 
   let make t =
     match Expr.term_view t with
-    | { Expr.f = sy; xs = [a;b]; ty; _ } when Sy.is_ac sy ->
+    | { Expr.f = sy; xs; ty; _ } when Sy.is_ac sy ->
+      let a, b = Expr.Args.to_pair xs in
       let ra, ctx1 = X.make a in
       let rb, ctx2 = X.make b in
       let ra, ctx = abstract2 sy a ra (ctx1 @ ctx2) in
@@ -238,7 +239,7 @@ module Make (X : Sig.X) = struct
     | {xs; _} ->
       Printer.print_err
         "AC theory expects only terms with 2 arguments; \
-         got %i (%a)." (List.length xs) Expr.print_list xs;
+         got %i (%a)." (Expr.Args.length xs) Expr.Args.print xs;
       assert false
 
   let is_mine_symb sy = (not @@ Options.get_no_ac ()) && Sy.is_ac sy

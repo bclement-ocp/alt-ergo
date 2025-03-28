@@ -68,7 +68,7 @@ let constr_of_destr ty dest =
       try
         List.find
           (fun { Ty.destrs; _ } ->
-             List.exists (fun (d, _) -> DE.Term.Const.equal dest d) destrs
+             Array.exists (fun (d, _) -> DE.Term.Const.equal dest d) destrs
           ) cases
       with Not_found -> assert false (* invariant *)
     end
@@ -169,27 +169,25 @@ module Shostak (X : ALIEN) = struct
     assert (not @@ Options.get_disable_adts ());
     Log.debug (fun k -> k "make %a" E.print t);
     let { E.f; xs; ty; _ } = E.term_view t in
-    let rev_rs, ctx =
-      List.fold_left
-        (fun (args, ctx) s ->
-           let rs, ctx' = X.make s in
-           rs :: args, List.rev_append ctx' ctx
-        )([], []) xs
-    in
-    let rs = List.rev rev_rs in
     match f, ty with
     | Sy.Op Sy.Constr hs, Ty.Tadt (name, params) ->
+      let xs = E.Args.to_array xs in
       let cases = Ty.type_body name params in
       let case_hs =
         try Ty.assoc_destrs hs cases with Not_found -> assert false
       in
-      let c_args =
-        try
-          List.rev @@
-          List.fold_left2
-            (fun c_args v (lbl, _) -> (lbl, v) :: c_args)
-            [] rs case_hs
-        with Invalid_argument _ -> assert false
+      let c_args, ctx =
+        assert (Array.length xs = Array.length case_hs);
+        let c_args = ref [] in
+        let ctx = ref [] in
+        for i = Array.length xs - 1 downto 0 do
+          let v = Array.unsafe_get xs i in
+          let (lbl, _) = Array.unsafe_get case_hs i in
+          let rv, ctx' = X.make v in
+          ctx := List.rev_append ctx' !ctx;
+          c_args := (lbl, rv) :: !c_args;
+        done;
+        !c_args, !ctx
       in
       let ctx =
         (* If [t] is a record constructor term of the form
@@ -199,16 +197,29 @@ module Shostak (X : ALIEN) = struct
            and store them in the context returned by `X.make`. *)
         match cases with
         | [{ destrs; _ }] ->
-          List.fold_left2
-            (fun ctx x (d, d_ty) ->
-               let access = E.mk_term (Sy.destruct d) [t] d_ty in
-               E.mk_eq ~iff:false x access :: ctx
-            ) ctx xs destrs
+          assert (Array.length xs = Array.length destrs);
+          let args = E.Args.of_expr t in
+          let ctx = ref ctx in
+          for i = 0 to Array.length xs - 1 do
+            let x = Array.unsafe_get xs i in
+            let (d, d_ty) = Array.unsafe_get destrs i in
+            let access = E.mk_term (Sy.destruct d) args d_ty in
+            ctx := E.mk_eq ~iff:false x access :: !ctx
+          done;
+          !ctx
         | _ -> ctx
       in
       is_mine @@ Constr {c_name = hs; c_ty = ty; c_args}, ctx
 
-    | Sy.Op Sy.Destruct _, _ -> X.term_embed t, ctx
+    | Sy.Op Sy.Destruct _, _ ->
+      (* Make sure to call [X.make] on subterms. *)
+      let ctx =
+        E.Args.fold_left (fun ctx t ->
+          let _, ctx' = X.make t in
+          List.rev_append ctx' ctx
+        ) [] xs
+      in
+      X.term_embed t, ctx
     (* No risk !
          if equal sel (embed sel_x) then X.term_embed t, ctx
          else sel_x, ctx (* canonization OK *)
@@ -342,7 +353,8 @@ module Shostak (X : ALIEN) = struct
           let {Ty.constr ; destrs} =
             constr_of_destr (X.type_info d_arg) d_name
           in
-          let xs = List.map (fun (_, ty) -> E.fresh_name ty) destrs in
+          let xs = Array.map (fun (_, ty) -> E.fresh_name ty) destrs in
+          let xs = E.Args.of_array xs in
           let cons =
             E.mk_term (Sy.constr constr) xs (X.type_info d_arg)
           in
@@ -428,12 +440,17 @@ module Shostak (X : ALIEN) = struct
 
   let to_model_term r =
     match embed r with
-    | Constr { c_name; c_ty; c_args } ->
-      let args =
-        My_list.try_map (fun (_, arg) -> X.to_model_term arg) c_args
-      in
-      Option.bind args @@ fun args ->
-      Some (E.mk_constr c_name args c_ty)
+    | Constr { c_name; c_ty; c_args } -> (
+      match
+        E.Args.of_list_map (fun (_, arg) ->
+          match X.to_model_term arg with
+          | Some t -> t
+          | None -> raise Not_found
+        ) c_args
+      with
+      | args -> Some (E.mk_constr c_name args c_ty)
+      | exception Not_found -> None
+    )
 
     | Select _ -> None
     | Alien a -> X.to_model_term a

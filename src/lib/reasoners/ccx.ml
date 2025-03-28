@@ -83,7 +83,7 @@ module type S = sig
   val assume_th_elt : t -> Expr.th_elt -> Explanation.t -> t
   val theories_instances :
     do_syntactic_matching:bool ->
-    Matching_types.info Expr.Map.t * Expr.t list Expr.Map.t Symbols.Map.t ->
+    Matching_types.info Expr.Map.t * Expr.args Expr.Map.t Symbols.Map.t ->
     t -> (Expr.t -> Expr.t -> bool) -> t * Sig_rel.instances
 
   val extract_concrete_model :
@@ -244,7 +244,7 @@ module Main : S = struct
   end
   (*BISECT-IGNORE-END*)
 
-  let one, _ = X.make (Expr.mk_term (Sy.name ~ns:Internal "@bottom") [] Ty.Tint)
+  let one, _ = X.make (Expr.symbol (Sy.name ~ns:Internal "@bottom") Ty.Tint)
 
   let concat_leaves uf l =
     let concat_rec acc t =
@@ -253,7 +253,7 @@ module Main : S = struct
       | res, [] -> res
       | res , _ -> List.rev_append res acc
     in
-    match List.fold_left concat_rec [] l with
+    match E.Args.fold_left concat_rec [] l with
       [] -> [one]
     | res -> res
 
@@ -270,7 +270,7 @@ module Main : S = struct
       let { E.f = f2; xs = xs2; ty = ty2; _ } = E.term_view t2 in
       if Symbols.equal f1 f2 && Ty.equal ty1 ty2 then
         try
-          let ex = List.fold_left2 (explain_equality env) Ex.empty xs1 xs2 in
+          let ex = E.Args.fold_left2 (explain_equality env) Ex.empty xs1 xs2 in
           let a = E.mk_eq ~iff:false t1 t2 in
           Debug.congruent a ex;
           Q.push (Literal.LTerm a, ex, Th_util.Other) facts.equas
@@ -278,12 +278,12 @@ module Main : S = struct
 
   let congruents env (facts: r Sig_rel.facts) t1 s =
     match E.term_view t1 with
-    | { E.xs = []; _ } -> ()
+    | { E.xs; _ } when E.Args.is_empty xs -> ()
     | { E.f; _ } when X.fully_interpreted f -> ()
     |  _ -> SE.iter (equal_only_by_congruence env facts t1) s
 
-  let fold_find_with_explanation find ex l =
-    List.fold_left
+  let[@inline] fold_find_with_explanation ~fold_left find ex l =
+    fold_left
       (fun (lr, ex) t ->
          let r, ex_r = find t in r::lr, Ex.union ex_r ex)
       ([], ex) l
@@ -300,13 +300,19 @@ module Main : S = struct
       let ex = Ex.union (Ex.union ex1 ex2) ex_a in
       LR.mkv_eq r1 r2, ex
     | E.Eql lt ->
-      let lr, ex = fold_find_with_explanation find ex_a lt in
+      let lr, ex =
+        fold_find_with_explanation ~fold_left:E.Args.fold_left find ex_a lt
+      in
       LR.mkv_distinct true (* not distinct*) (List.rev lr), ex
     | E.Distinct lt ->
-      let lr, ex = fold_find_with_explanation find ex_a lt in
+      let lr, ex =
+        fold_find_with_explanation ~fold_left:E.Args.fold_left find ex_a lt
+      in
       LR.mkv_distinct false (*not neg*) (List.rev lr), ex
     | E.Builtin(b, s, l) ->
-      let lr, ex  = fold_find_with_explanation find ex_a l in
+      let lr, ex  =
+        fold_find_with_explanation ~fold_left:E.Args.fold_left find ex_a l
+      in
       LR.mkv_builtin b s (List.rev lr), ex
 
   let view_r find va ex_a =
@@ -321,10 +327,14 @@ module Main : S = struct
       let ex = Ex.union (Ex.union ex1 ex2) ex_a in
       LR.mkv_eq r1 r2, ex
     | Xliteral.Distinct (b, lt) ->
-      let lr, ex = fold_find_with_explanation find ex_a lt in
+      let lr, ex =
+        fold_find_with_explanation ~fold_left:List.fold_left find ex_a lt
+      in
       LR.mkv_distinct b (List.rev lr), ex
     | Xliteral.Builtin(b, s, l) ->
-      let lr, ex  = fold_find_with_explanation find ex_a l in
+      let lr, ex  =
+        fold_find_with_explanation ~fold_left:List.fold_left find ex_a l
+      in
       LR.mkv_builtin b s (List.rev lr), ex
 
   let term_canonical_view env a ex_a =
@@ -340,17 +350,22 @@ module Main : S = struct
     | Some _, false -> () (* not an original term *)
     | Some t1, true ->  (* original term *)
       match E.term_view t1 with
-      | { E.f = f1; xs = [x]; _ } ->
+      | { E.f = f1; xs; _ } when E.Args.is_expr xs ->
+        let x = E.Args.to_expr xs in
         let ty_x = Expr.type_info x in
         E.Set.iter
           (fun t2 ->
              match E.term_view t2 with
-             | { E.f = f2 ; xs = [y]; _ } when Sy.equal f1 f2 ->
+             | { E.f = f2 ; xs = ys; _ }
+               when Sy.equal f1 f2 && E.Args.is_expr ys
+              ->
+               let y = E.Args.to_expr ys in
                let ty_y = Expr.type_info y in
                if Ty.equal ty_x ty_y then
                  begin match Uf.are_distinct env.uf t1 t2 with
                    | Entailed { ex = ex_r; _ } ->
-                     let a = E.mk_distinct ~iff:false [x; y] in
+                     let args = E.Args.of_pair (x, y) in
+                     let a = E.mk_distinct ~iff:false args in
                      Debug.contra_congruence a ex_r;
                      Q.push (Literal.LTerm a, ex_r, Th_util.Other) facts.diseqs
                    | Unknown -> assert false
@@ -486,7 +501,7 @@ module Main : S = struct
 
       (* we add t's arguments in env *)
       let { E.xs; _ } = E.term_view t in
-      let env = List.fold_left (fun env t -> add_term env facts t ex) env xs in
+      let env = E.Args.fold_left (fun env t -> add_term env facts t ex) env xs in
       (* we update uf and use *)
       let nuf, ctx  = Uf.add env.uf t in
       Debug.make_cst t ctx;
@@ -524,12 +539,12 @@ module Main : S = struct
       let env = add_term env facts t1 ex in
       add_term env facts t2 ex
     | E.Eql lt ->
-      List.fold_left
+      E.Args.fold_left
         (fun env t-> add_term env facts t ex) env  lt
     | E.Distinct lt
     | E.Builtin (_, _, lt) ->
       let env =
-        List.fold_left
+        E.Args.fold_left
           (fun env t-> add_term env facts t ex)
           env  lt
       in

@@ -158,6 +158,18 @@ let [@inline always] cmp_lists l1 l2 cmp_elts =
   | Cmp n -> n
   | Invalid_argument _ -> List.length l1 - List.length l2
 
+let [@inline always] cmp_arrays l1 l2 cmp_elts =
+  try
+    Array.iter2
+      (fun a b ->
+         let c = cmp_elts a b in
+         if c <> 0 then raise (Cmp c)
+      )l1 l2;
+    0
+  with
+  | Cmp n -> n
+  | Invalid_argument _ -> Int.compare (Array.length l1) (Array.length l2)
+
 type matching_env =
   {
     nb_triggers : int;

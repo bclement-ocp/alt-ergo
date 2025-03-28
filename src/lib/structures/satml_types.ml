@@ -954,7 +954,7 @@ module Flat_Formula : FLAT_FORMULA = struct
 
   let mk_new_proxy n =
     let sy = Symbols.name ~ns:Internal @@ "PROXY__" ^ string_of_int n in
-    E.mk_term sy [] Ty.Tbool
+    E.symbol sy Ty.Tbool
 
   let get_proxy_of f proxies_mp =
     try let p, _, _ = Util.MI.find f.tag proxies_mp in Some p

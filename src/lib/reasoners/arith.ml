@@ -239,28 +239,30 @@ module Shostak
       let c = Q.mult coef q in
       P.add_const c p, ctx
 
-    | Sy.Op Sy.Mult, [t1;t2] ->
+    | Sy.Op Sy.Mult, _ ->
+      let t1, t2 = E.Args.to_pair xs in
       let p1, ctx = mke coef (empty_polynome ty) t1 ctx in
       let p2, ctx = mke Q.one (empty_polynome ty) t2 ctx in
       if Options.get_no_nla() && P.is_const p1 == None && P.is_const p2 == None
       then
         (* becomes uninterpreted *)
         let tau =
-          E.mk_term (Sy.name ~kind:Sy.Ac ~ns:Internal "@*") [t1; t2] ty
+          E.binary ~ty (Sy.name ~kind:Sy.Ac ~ns:Internal "@*") t1 t2
         in
         let xtau, ctx' = X.make tau in
         P.add p (P.create [coef, xtau] Q.zero ty), List.rev_append ctx' ctx
       else
         P.add p (P.mult p1 p2), ctx
 
-    | Sy.Op Sy.Div, [t1;t2] ->
+    | Sy.Op Sy.Div, _ ->
+      let t1, t2 = E.Args.to_pair xs in
       let p1, ctx = mke Q.one (empty_polynome ty) t1 ctx in
       let p2, ctx = mke Q.one (empty_polynome ty) t2 ctx in
       if Options.get_no_nla() &&
          (P.is_const p2 == None ||
           (ty == Ty.Tint && P.is_const p1 == None)) then
         (* becomes uninterpreted *)
-        let tau = E.mk_term (Sy.name ~ns:Internal "@/") [t1; t2] ty in
+        let tau = E.binary ~ty (Sy.name ~ns:Internal "@/") t1 t2 in
         let xtau, ctx' = X.make tau in
         P.add p (P.create [coef, xtau] Q.zero ty), List.rev_append ctx' ctx
       else
@@ -274,20 +276,22 @@ module Shostak
         P.add p (P.mult_const coef p3), ctx
 
     | Sy.Op Sy.Plus , l ->
-      List.fold_left (fun (p, ctx) u -> mke coef p u ctx )(p, ctx) l
+      E.Args.fold_left (fun (p, ctx) u -> mke coef p u ctx )(p, ctx) l
 
-    | Sy.Op Sy.Minus , [t1;t2] ->
+    | Sy.Op Sy.Minus , _ ->
+      let t1, t2 = E.Args.to_pair xs in
       let p2, ctx = mke (Q.minus coef) p t2 ctx in
       mke coef p2 t1 ctx
 
-    | Sy.Op Sy.Modulo , [t1;t2] ->
+    | Sy.Op Sy.Modulo , _ ->
+      let t1, t2 = E.Args.to_pair xs in
       let p1, ctx = mke Q.one (empty_polynome ty) t1 ctx in
       let p2, ctx = mke Q.one (empty_polynome ty) t2 ctx in
       if Options.get_no_nla() &&
          (P.is_const p1 == None || P.is_const p2 == None)
       then
         (* becomes uninterpreted *)
-        let tau = E.mk_term (Sy.name ~ns:Internal "@%") [t1; t2] ty in
+        let tau = E.binary ~ty (Sy.name ~ns:Internal "@%") t1 t2 in
         let xtau, ctx' = X.make tau in
         P.add p (P.create [coef, xtau] Q.zero ty), List.rev_append ctx' ctx
       else
@@ -296,13 +300,14 @@ module Shostak
           with
           | Polynome.Not_a_num -> mk_euc_modulo t1 t2 p1 p2 ctx
           | Division_by_zero | Polynome.Maybe_zero ->
-            let t = E.mk_term mod_symb [t1; t2] Tint in
+            let t = E.binary ~ty:Tint mod_symb t1 t2 in
             P.create [Q.one, X.term_embed t] Q.zero ty, ctx
         in
         P.add p (P.mult_const coef p3), ctx
 
     (*** <begin>: partial handling of some arith/FPA operators **)
-    | Sy.Op Float, [prec; exp; mode; x] ->
+    | Sy.Op Float, _ ->
+      let prec, exp, mode, x = E.Args.to_quadruple xs in
       let prec = E.int_view prec and exp = E.int_view exp in
       let mode = E.rounding_mode_view mode in
       let aux_func e =
@@ -311,50 +316,62 @@ module Shostak
       in
       mk_partial_interpretation_1 aux_func coef p ty t x, ctx
 
-    | Sy.Op Sy.Integer_round, [mode; x] ->
+    | Sy.Op Sy.Integer_round, _ ->
+      let mode, x = E.Args.to_pair xs in
       let aux_func =
         Fpa_rounding.round_to_integer
           (E.rounding_mode_view mode)
       in
       mk_partial_interpretation_1 aux_func coef p ty t x, ctx
 
-    | Sy.Op (Sy.Abs_int | Sy.Abs_real) , [x] ->
+    | Sy.Op (Sy.Abs_int | Sy.Abs_real) , _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 Q.abs coef p ty t x, ctx
 
-    | Sy.Op Sy.Sqrt_real, [x] ->
+    | Sy.Op Sy.Sqrt_real, _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 exact_sqrt_or_Exit coef p ty t x, ctx
 
-    | Sy.Op Sy.Sqrt_real_default, [x] ->
+    | Sy.Op Sy.Sqrt_real_default, _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 default_sqrt_or_Exit coef p ty t x, ctx
 
-    | Sy.Op Sy.Sqrt_real_excess, [x] ->
+    | Sy.Op Sy.Sqrt_real_excess, _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 excess_sqrt_or_Exit coef p ty t x, ctx
 
-    | Sy.Op Sy.Real_of_int, [x] ->
+    | Sy.Op Sy.Real_of_int, _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 (fun d -> d) coef p ty t x, ctx
 
-    | Sy.Op Sy.Int_floor, [x] ->
+    | Sy.Op Sy.Int_floor, _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 Q.floor coef p ty t x, ctx
 
-    | Sy.Op Sy.Int_ceil, [x] ->
+    | Sy.Op Sy.Int_ceil, _ ->
+      let x = E.Args.to_expr xs in
       mk_partial_interpretation_1 Q.ceiling coef p ty t x, ctx
 
-    | Sy.Op (Sy.Max_int | Sy.Max_real), [x;y] ->
+    | Sy.Op (Sy.Max_int | Sy.Max_real), _ ->
+      let x, y = E.Args.to_pair xs in
       let aux_func c d = if Q.compare c d >= 0 then c else d in
       mk_partial_interpretation_2 aux_func coef p ty t x y, ctx
 
-    | Sy.Op (Sy.Min_int | Sy.Min_real), [x;y] ->
+    | Sy.Op (Sy.Min_int | Sy.Min_real), _ ->
+      let x, y = E.Args.to_pair xs in
       let aux_func c d = if Q.compare c d <= 0 then c else d in
       mk_partial_interpretation_2 aux_func coef p ty t x y, ctx
 
-    | Sy.Op Sy.Integer_log2, [x] ->
+    | Sy.Op Sy.Integer_log2, _ ->
+      let x = E.Args.to_expr xs in
       let aux_func q =
         if Q.compare_to_0 q <= 0 then raise Exit;
         Q.from_int (Fpa_rounding.integer_log_2 q)
       in
       mk_partial_interpretation_1 aux_func coef p ty t x, ctx
 
-    | Sy.Op Sy.Pow, [x; y] ->
+    | Sy.Op Sy.Pow, _ ->
+      let x, y = E.Args.to_pair xs in
       mk_partial_interpretation_2
         (fun x y -> calc_power x y ty) coef p ty t x y, ctx
 

@@ -75,7 +75,7 @@ module type S = sig
   val assume_th_elt : t -> Expr.th_elt -> Explanation.t -> t
   val theories_instances :
     do_syntactic_matching:bool ->
-    Matching_types.info Expr.Map.t * Expr.t list Expr.Map.t Symbols.Map.t ->
+    Matching_types.info Expr.Map.t * Expr.args Expr.Map.t Symbols.Map.t ->
     t -> (Expr.t -> Expr.t -> bool) ->
     int -> int -> t * Sig_rel.instances
 
@@ -137,7 +137,7 @@ module Main_Default : S = struct
            match E.term_view t with
            | { E.f = Sy.Name { hs; kind = ((Sy.Ac | Sy.Other) as is_ac); _ };
                xs; ty; _ } ->
-             let xs = List.map E.type_info xs in
+             let xs = E.Args.type_info xs in
              let xs, ty =
                try
                  let xs', ty', is_ac' = Hstring.Map.find hs mp in
@@ -557,7 +557,7 @@ module Main_Default : S = struct
              | E.Eq (t1, t2) ->
                SE.add t1 (SE.add t2 acc)
              | E.Eql l | E.Distinct l | E.Builtin (_, _, l) ->
-               List.fold_right SE.add l acc
+               E.Args.fold_right SE.add l acc
              | E.Pred (t1, _) ->
                SE.add t1 acc
 
@@ -790,7 +790,8 @@ module Main_Default : S = struct
             let t = add_and_process_conseqs a t in
             CC_X.are_equal t.gamma t1 t2 ~init_terms:false
 
-          | E.Distinct [t1; t2] ->
+          | E.Distinct xs when E.Args.is_pair xs ->
+            let t1, t2 = E.Args.to_pair xs in
             let na = E.neg a in
             let t = add_and_process_conseqs na t in (* na ? *)
             CC_X.are_distinct t.gamma t1 t2
@@ -839,7 +840,7 @@ module Main_Default : S = struct
         objectives = Objective.Model.empty;
       }
     in
-    let a = E.mk_distinct ~iff:false [E.vrai; E.faux] in
+    let a = E.mk_distinct ~iff:false (E.Args.of_pair (E.vrai, E.faux)) in
     let t, _, _ =
       assume true [L.make @@ Literal.LTerm a, Th_util.Other, Ex.empty, 0, -1] t
     in

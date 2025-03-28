@@ -63,7 +63,7 @@ exception TypeClash of t*t
 
 type adt_constr =
   { constr : DE.term_cst ;
-    destrs : (DE.term_cst * t) list }
+    destrs : (DE.term_cst * t) array }
 
 type type_body = adt_constr list
 
@@ -117,15 +117,14 @@ let print_generic body_of =
             fprintf fmt "}"
         end
 
-  and print_adt_tuple fmt = function
-    | [] -> ()
-    | (d, e)::l ->
-      Format.fprintf fmt " of { %a : %a " DE.Term.Const.print d (print None) e;
-      List.iter
-        (fun (d, e) ->
-           Format.fprintf fmt "; %a : %a " DE.Term.Const.print d (print None) e
-        ) l;
-      Format.fprintf fmt "}"
+  and print_adt_tuple ppf = function
+    | [| |] -> ()
+    | args ->
+      Fmt.pf ppf " of {%a}"
+        (Fmt.array ~sep:(Fmt.any ";") (fun ppf (d, e) ->
+          Fmt.pf ppf " %a : %a " DE.Term.Const.print d (print None) e
+        ))
+        args
 
   and print_list fmt = function
     | [] -> ()
@@ -311,18 +310,20 @@ module Decls = struct
 
   let fresh_type params cases =
     let params, subst = fresh_list params esubst in
-    let _subst, cases =
-      List.fold_left
-        (fun (subst, cases) {constr; destrs} ->
-           let subst, destrs =
-             List.fold_left
-               (fun (subst, destrs) (d, ty) ->
-                  let ty, subst = fresh ty subst in
-                  subst, (d, ty) :: destrs
-               )(subst, []) (List.rev destrs)
+    let subst_ref = ref subst in
+    let cases =
+      List.map
+        (fun {constr; destrs} ->
+           let destrs =
+             Array.map
+               (fun (d, ty) ->
+                  let ty, subst = fresh ty !subst_ref in
+                  subst_ref := subst;
+                  (d, ty)
+               ) destrs
            in
-           subst, {constr; destrs} :: cases
-        )(subst, []) (List.rev cases)
+           {constr; destrs}
+        ) cases
     in
     params, cases
 
@@ -366,7 +367,7 @@ module Decls = struct
             (fun {constr; destrs} ->
                {constr;
                 destrs =
-                  List.map (fun (d, ty) -> d, apply_subst sbt ty) destrs }
+                  Array.map (fun (d, ty) -> d, apply_subst sbt ty) destrs }
             ) cases
         in
         let params = List.map (fun ty -> apply_subst sbt ty) params in
@@ -416,7 +417,7 @@ let tunit =
     | Some def -> Nest.attach_orders [def]
     | None -> assert false
   in
-  let body = Some [DE.Term.Cstr.void, []] in
+  let body = Some [ DE.Term.Cstr.void, [| |] ] in
   let ty = t_adt ~body DE.Ty.Const.unit [] in
   ty
 

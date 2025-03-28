@@ -534,13 +534,13 @@ let mk_ty_decl (ty_c: DE.ty_cst) =
       Array.fold_right (
         fun DE.{ cstr; dstrs; _ } accl ->
           let fields =
-            Array.fold_right (
-              fun tc_o acc ->
+            Array.map (
+              fun tc_o ->
                 match tc_o with
                 | Some (DE.{ id_ty; _ } as field) ->
-                  (field, dty_to_ty id_ty) :: acc
+                  (field, dty_to_ty id_ty)
                 | None -> assert false
-            ) dstrs []
+            ) dstrs
           in
           (cstr, fields) :: accl
       ) cases []
@@ -585,13 +585,13 @@ let mk_mr_ty_decls (tdl: DE.ty_cst list) =
         Array.fold_right (
           fun DE.{ cstr; dstrs; _ } accl ->
             let fields =
-              Array.fold_right (
-                fun tc_o acc ->
+              Array.map (
+                fun tc_o ->
                   match tc_o with
                   | Some (DE.{ id_ty; _ } as id) ->
-                    (id, dty_to_ty id_ty) :: acc
+                    (id, dty_to_ty id_ty)
                   | None -> assert false
-              ) dstrs []
+              ) dstrs
             in
             (cstr, fields) :: accl
         ) cases []
@@ -720,7 +720,7 @@ end = struct
         List.fold_left
           (fun acc (var, destr, ty) ->
              let destr = mk_destr destr in
-             let d = E.mk_term destr [e] ty in
+             let d = E.mk_term destr (E.Args.of_expr e) ty in
              E.mk_let var d acc
           ) p args
       in
@@ -830,39 +830,23 @@ let destruct_app e =
 
 let mk_lt translate ty x y =
   if ty == `Int then
-    let e3 =
-      E.mk_term (Sy.Op Sy.Minus) [translate y; E.int "1"] Ty.Tint
-    in
-    let e1 = translate x in
-    E.mk_builtin ~is_pos:true Sy.LE [e1; e3]
+    E.Ints.(translate x < translate y)
   else
-    E.mk_builtin ~is_pos:true Sy.LT [translate x; translate y]
+    E.Reals.(translate x < translate y)
 
 let mk_gt translate ty x y =
   if ty == `Int then
-    let e3 =
-      E.mk_term (Sy.Op Sy.Minus) [translate x; E.int "1"] Ty.Tint
-    in
-    let e2 = translate y in
-    E.mk_builtin ~is_pos:true Sy.LE [e2; e3]
+    E.Ints.(translate x > translate y)
   else
-    E.mk_builtin ~is_pos:true Sy.LT [translate y; translate x]
+    E.Reals.(translate x > translate y)
 
 let mk_add translate sy ty l =
-  let rec aux_mk_add l =
-    match l with
-    | h :: t ->
-      let args = aux_mk_add t in
-      translate h :: args
-    | [] -> []
-  in
-  let args = aux_mk_add l in
-  E.mk_term sy args ty
+  E.mk_term sy (E.Args.of_list_map translate l) ty
 
 let mk_rounding fpar =
   let tcst = Fpa_rounding.term_cst_of_rounding_mode fpar in
   let ty = Fpa_rounding.fpa_rounding_mode in
-  E.mk_constr tcst [] ty
+  E.mk_constr tcst E.Args.empty ty
 
 (** [mk_expr ~loc ~name_base ~toplevel ~decl_kind term]
 
@@ -890,11 +874,11 @@ let rec mk_expr
           | B.Base ->
             let sy = Cache.find_sy tcst in
             let ty = dty_to_ty term_ty in
-            E.mk_term sy [] ty
+            E.symbol sy ty
 
           | B.Constructor _ ->
             let ty = dty_to_ty term_ty in
-            E.mk_constr tcst [] ty
+            E.mk_constr tcst E.Args.empty ty
 
           | _ -> unsupported "Constant term %a" DE.Term.print term
         end
@@ -902,7 +886,7 @@ let rec mk_expr
       | Var ({ id_ty; _ } as ty_v) ->
         let ty = dty_to_ty id_ty in
         let sy = Cache.find_sy ty_v in
-        E.mk_term sy [] ty
+        E.symbol sy ty
 
       | App (
           { term_descr = Cst ({
@@ -911,7 +895,8 @@ let rec mk_expr
           } as app_term, _, args
         ) ->
         let op op =
-          E.mk_term (Sy.Op op) (List.map (fun a -> aux_mk_expr a) args)
+          E.mk_term (Sy.Op op)
+            (E.Args.of_list_map aux_mk_expr args)
             (dty_to_ty term_ty)
         in
         begin match builtin, args with
@@ -920,11 +905,11 @@ let rec mk_expr
           | B.Neg, [x] ->
             E.neg (aux_mk_expr x)
 
-          | B.Minus mty, [x] ->
-            let e1, ty =
-              if mty == `Int then E.int "0", Ty.Tint else E.real "0",Ty.Treal
-            in
-            E.mk_term (Sy.Op Sy.Minus) [e1; aux_mk_expr x] ty
+          | B.Minus mty, [x] -> (
+            match mty with
+            | `Int -> E.Ints.(-aux_mk_expr x)
+            | `Rat | `Real -> E.Reals.(-aux_mk_expr x)
+          )
 
           | B.Destructor { case; field; adt; _ }, [x] ->
             begin match DT.definition adt with
@@ -938,7 +923,7 @@ let rec mk_expr
                       | Tadt _ -> Sy.destruct destr
                       | _ -> assert false
                     in
-                    E.mk_term sy [e] ty
+                    E.mk_term sy (E.Args.of_expr e) ty
                   | _ ->
                     Fmt.failwith
                       "Adt Destructor error: Can't find %dth field of %dth \
@@ -1004,7 +989,10 @@ let rec mk_expr
 
           | B.Select, [ x; y ] ->
             let rty = dty_to_ty term_ty in
-            E.mk_term (Sy.Op Sy.Get) [aux_mk_expr x; aux_mk_expr y] rty
+            E.mk_term
+              (Sy.Op Sy.Get)
+              (E.Args.of_pair (aux_mk_expr x, aux_mk_expr y))
+              rty
 
           (* Binary functions from FixedSizeBitVectors theory *)
           | B.Bitv_concat _, [ x; y ] -> E.BV.concat (mk x) (mk y)
@@ -1051,15 +1039,14 @@ let rec mk_expr
             let e1 = aux_mk_expr x in
             let e2 = aux_mk_expr y in
             let e3 = aux_mk_expr z in
-            E.mk_term (Sy.Op Sy.Set) [e1; e2; e3] ty
+            E.mk_term (Sy.Op Sy.Set) (E.Args.of_triple (e1, e2, e3)) ty
 
           (* N-ary applications *)
 
           | B.Base, _ ->
             let ty = dty_to_ty term_ty in
             let sy = Cache.find_sy tcst in
-            let l = List.map (fun t -> aux_mk_expr t) args in
-            E.mk_term sy l ty
+            E.mk_term sy (E.Args.of_list_map aux_mk_expr args) ty
 
           | B.And, h :: (_ :: _ as t) ->
             List.fold_left (
@@ -1119,14 +1106,16 @@ let rec mk_expr
             let (res, _) =
               List.fold_left (
                 fun (acc, curr) next ->
+                  let args =
+                    E.Args.of_pair (aux_mk_expr curr, aux_mk_expr next)
+                  in
                   E.mk_and acc (
-                    E.mk_builtin ~is_pos:true Sy.LE
-                      [aux_mk_expr curr; aux_mk_expr next]
+                    E.mk_builtin ~is_pos:true Sy.LE args
                   ) false,
                   next
               ) (
                 E.mk_builtin ~is_pos:true Sy.LE
-                  [aux_mk_expr h1; aux_mk_expr h2],
+                (E.Args.of_pair (aux_mk_expr h1, aux_mk_expr h2)),
                 h2
               ) t
             in res
@@ -1137,12 +1126,12 @@ let rec mk_expr
                 fun (acc, curr) next ->
                   E.mk_and acc (
                     E.mk_builtin ~is_pos:true Sy.LE
-                      [aux_mk_expr next; aux_mk_expr curr]
+                      (E.Args.of_pair (aux_mk_expr next, aux_mk_expr curr))
                   ) false,
                   next
               ) (
                 E.mk_builtin ~is_pos:true Sy.LE
-                  [aux_mk_expr h2; aux_mk_expr h1],
+                  (E.Args.of_pair (aux_mk_expr h2, aux_mk_expr h1)),
                 h2
               ) t
             in res
@@ -1157,40 +1146,46 @@ let rec mk_expr
             let sy = Sy.Op Sy.Minus in
             let args = List.rev_map aux_mk_expr (List.rev t) in
             List.fold_left
-              (fun x y -> E.mk_term sy [x; y] rty) (aux_mk_expr h) args
+              (fun x y -> E.mk_term sy (E.Args.of_pair (x, y)) rty)
+              (aux_mk_expr h) args
 
           | B.Mul ty, h :: t ->
             let rty = if ty == `Int then Ty.Tint else Treal in
             let sy = Sy.Op Sy.Mult in
             let args = List.rev_map aux_mk_expr (List.rev t) in
             List.fold_left
-              (fun x y -> E.mk_term sy [x; y] rty) (aux_mk_expr h) args
+              (fun x y -> E.mk_term sy (E.Args.of_pair (x, y)) rty)
+              (aux_mk_expr h) args
 
           | (B.Div _ | B.Div_e (`Real | `Rat)), h :: t ->
             let sy = Sy.Op Sy.Div in
             let args = List.rev_map aux_mk_expr (List.rev t) in
             List.fold_left
-              (fun x y -> E.mk_term sy [x; y] Ty.Treal) (aux_mk_expr h) args
+              (fun x y -> E.mk_term sy (E.Args.of_pair (x, y)) Ty.Treal)
+              (aux_mk_expr h) args
 
           | B.Div_e `Int, h :: t ->
             let sy = Sy.Op Sy.Div in
             let args = List.rev_map aux_mk_expr (List.rev t) in
             List.fold_left
-              (fun x y -> E.mk_term sy [x; y] Ty.Tint) (aux_mk_expr h) args
+              (fun x y -> E.mk_term sy (E.Args.of_pair (x, y)) Ty.Tint)
+              (aux_mk_expr h) args
 
           | B.Modulo_e ty, h :: t ->
             let rty = if ty == `Int then Ty.Tint else Treal in
             let sy = Sy.Op Sy.Modulo in
             let args = List.rev_map aux_mk_expr (List.rev t) in
             List.fold_left
-              (fun x y -> E.mk_term sy [x; y] rty) (aux_mk_expr h) args
+              (fun x y -> E.mk_term sy (E.Args.of_pair (x, y)) rty)
+              (aux_mk_expr h) args
 
           | B.Pow ty, h :: t ->
             let rty = if ty == `Int then Ty.Tint else Treal in
             let sy = Sy.Op Sy.Pow in
             let args = List.rev_map aux_mk_expr (List.rev t) in
             List.fold_left
-              (fun x y -> E.mk_term sy [x; y] rty) (aux_mk_expr h) args
+              (fun x y -> E.mk_term sy (E.Args.of_pair (x, y)) rty)
+              (aux_mk_expr h) args
 
           | B.Equal, h1 :: h2 :: t ->
             begin match h1.term_ty.ty_descr with
@@ -1228,13 +1223,13 @@ let rec mk_expr
             end
 
           | B.Distinct, _ ->
-            E.mk_distinct ~iff:true (List.map (fun t -> aux_mk_expr t) args)
+            let args = E.Args.of_list_map aux_mk_expr args in
+            E.mk_distinct ~iff:true args
 
           | B.Constructor _, _ ->
             let ty = dty_to_ty term_ty in
             let sy = Sy.constr tcst in
-            let l = List.map (fun t -> aux_mk_expr t) args in
-            E.mk_term sy l ty
+            E.mk_term sy (E.Args.of_list_map aux_mk_expr args) ty
 
           | B.Coercion, [ x ] ->
             begin match DT.view (DE.Term.ty x), DT.view term_ty with
@@ -1249,7 +1244,7 @@ let rec mk_expr
               i :: j :: List.map (fun a -> aux_mk_expr a) args in
             E.mk_term
               (Sy.Op Float)
-              args
+              (E.Args.of_list args)
               (dty_to_ty term_ty)
           | Integer_round, _ -> op Integer_round
           | Abs_real, _ -> op Abs_real
@@ -1420,7 +1415,7 @@ let rec mk_expr
           let v = Cache.find_var t_v in
           let sy = Sy.mk_maps_to v in
           let e2 = aux_mk_expr y in
-          E.mk_term sy [e2] Ty.Tbool
+          E.mk_term sy (E.Args.of_expr e2) Ty.Tbool
         | _ ->
           Fmt.failwith
             "%aMaps_to: expected a variable but got: %a"
@@ -1441,7 +1436,8 @@ let rec mk_expr
         | Some ub -> ub
         | None -> Sy.mk_bound qm sort ~is_open:true ~is_lower:false
       in
-      E.mk_term (Sy.mk_in lb ub) [aux_mk_expr main_expr] Ty.Tbool
+      E.mk_term (Sy.mk_in lb ub)
+        (E.Args.of_expr (aux_mk_expr main_expr)) Ty.Tbool
 
     (* conjunction *)
     | B.And, [x; y] ->
@@ -1464,7 +1460,8 @@ let rec mk_expr
             | Some ub, None | None, Some ub -> ub
             | _ -> assert false
           in
-          E.mk_term (Sy.mk_in lb ub) [aux_mk_expr main_expr] Ty.Tbool
+          let args = E.Args.of_expr (aux_mk_expr main_expr) in
+          E.mk_term (Sy.mk_in lb ub) args Ty.Tbool
         | _ ->
           Fmt.failwith "%aInvalid semantic trigger: %a"
             DStd.Loc.fmt loc DE.Term.print t
@@ -1614,7 +1611,7 @@ let rec is_pure_term t =
   match f with
   | (Sy.Let | Lit _ | Form _) -> false
   | Sy.Op Tite -> false
-  | _ -> List.for_all is_pure_term xs
+  | _ -> E.Args.for_all is_pure_term xs
 
 let make file acc stmt =
   let rec aux acc (stmt: _ Typer_Pipe.stmt) =
@@ -1819,12 +1816,12 @@ let make file acc stmt =
                     let v = Var.of_string (get_basename path) in
                     let sy = Sy.var v in
                     Cache.store_sy tv sy;
-                    let e = E.mk_term sy [] ty in
+                    let e = E.symbol sy ty in
                     Var.Map.add v ty binders, e :: acc
                 ) (Var.Map.empty, []) terml
               in
               let sy = Cache.find_sy tcst in
-              let e = E.mk_term sy (List.rev rev_args) rty in
+              let e = E.mk_term sy (E.Args.of_list (List.rev rev_args)) rty in
               binders, e
             in
 

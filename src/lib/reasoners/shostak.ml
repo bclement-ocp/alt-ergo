@@ -318,8 +318,10 @@ struct
       begin
         let Expr.{ f; xs; _ } = Expr.term_view t in
         (* Constant terms that have no theories. *)
-        match f, xs with
-        | Symbols.(True | False), [] -> true
+        match f with
+        | Symbols.(True | False) ->
+          assert (E.Args.is_empty xs);
+          true
         | _ -> false
       end
     | Ac _ -> false

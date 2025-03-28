@@ -42,7 +42,7 @@ module type S = sig
   val make:
     max_t_depth:int ->
     Matching_types.info ME.t ->
-    E.t list ME.t Symbols.Map.t ->
+    E.args ME.t Symbols.Map.t ->
     Matching_types.trigger_info list ->
     t
 
@@ -50,7 +50,7 @@ module type S = sig
   val max_term_depth : t -> int -> t
   val add_triggers :
     Util.matching_env -> t -> (Expr.t * int * Explanation.t) ME.t -> t
-  val terms_info : t -> Matching_types.info ME.t * E.t list ME.t Symbols.Map.t
+  val terms_info : t -> Matching_types.info ME.t * E.args ME.t Symbols.Map.t
   val query :
     Util.matching_env -> t -> theory ->
     (Matching_types.trigger_info * Matching_types.gsubst list) list
@@ -71,7 +71,7 @@ module Make (X : Arg) : S with type theory = X.t = struct
   type theory = X.t
 
   type t = {
-    fils : E.t list ME.t Symbols.Map.t ;
+    fils : E.args ME.t Symbols.Map.t ;
     info : Matching_types.info ME.t ;
     max_t_depth : int;
     pats : Matching_types.trigger_info list
@@ -151,8 +151,8 @@ module Make (X : Arg) : S with type theory = X.t = struct
         print_dbg
           ~module_name:"Matching" ~function_name:"match_list"
           "I match %a against %a with subst: sbs=%a | sty= %a"
-          E.print_list pats
-          E.print_list xs
+          E.Args.print pats
+          E.Args.print xs
           (SubstE.pp E.print) sbs
           Ty.print_subst sty
 
@@ -225,7 +225,7 @@ module Make (X : Arg) : S with type theory = X.t = struct
                 env.info
           }
         in
-        List.fold_left add_rec env xs
+        E.Args.fold_left add_rec env xs
     in
     if info.term_age > age_limite () then env else add_rec env t
 
@@ -318,21 +318,7 @@ module Make (X : Arg) : S with type theory = X.t = struct
     | _ , [] -> l1
     | _ -> List.fold_left (fun acc e -> e :: acc) l2 (List.rev l1)
 
-  module SLE = (* sets of lists of terms *)
-    Set.Make(struct
-      type t = E.t list
-      let compare l1 l2 =
-        try
-          List.iter2
-            (fun t1 t2 ->
-               let c = E.compare t1 t2 in
-               if c <> 0 then raise (Util.Cmp c)
-            ) l1 l2;
-          0
-        with Invalid_argument _ ->
-          List.length l1 - List.length l2
-           | Util.Cmp n -> n
-    end)
+  module SLE = Set.Make(E.Args)
 
   let filter_classes mconf cl tbox =
     if mconf.Util.no_ematching then cl
@@ -341,9 +327,7 @@ module Make (X : Arg) : S with type theory = X.t = struct
         List.fold_left
           (fun acc xs ->
              let xs =
-               List.rev
-                 (List.rev_map
-                    (fun t -> X.term_repr tbox t ~init_term:false) xs)
+              E.Args.map (fun t -> X.term_repr tbox t ~init_term:false) xs
              in
              SLE.add xs acc
           ) SLE.empty cl
@@ -351,22 +335,26 @@ module Make (X : Arg) : S with type theory = X.t = struct
       SLE.elements mtl
 
   let plus_of_minus t d ty =
-    [E.mk_term (Symbols.Op Symbols.Minus) [t; d] ty ; d]
+    E.Args.of_pair
+      (E.binary ~ty (Symbols.Op Symbols.Minus) t d, d)
 
   let minus_of_plus t d ty =
-    [E.mk_term (Symbols.Op Symbols.Plus)  [t; d] ty ; d]
+    E.Args.of_pair
+      (E.binary ~ty (Symbols.Op Symbols.Plus) t d, d)
 
   let linear_arithmetic_matching f_pat pats _ty_pat t =
     let ty = E.type_info t in
     if not (Options.get_arith_matching ()) ||
        ty != Ty.Tint && ty != Ty.Treal then []
     else
-      match f_pat, pats with
-      | Symbols.Op Symbols.Plus, [p1; p2] ->
+      match f_pat with
+      | Symbols.Op Symbols.Plus ->
+        let p1, p2 = E.Args.to_pair pats in
         if E.is_ground p2 then [plus_of_minus t p2 ty]
         else if E.is_ground p1 then [plus_of_minus t p1 ty] else []
 
-      | Symbols.Op Symbols.Minus, [p1; p2] ->
+      | Symbols.Op Symbols.Minus ->
+        let p1, p2 = E.Args.to_pair pats in
         if E.is_ground p2 then [minus_of_plus t p2 ty]
         else if E.is_ground p1 then [minus_of_plus t p1 ty] else []
       | _ -> []
@@ -434,7 +422,7 @@ module Make (X : Arg) : S with type theory = X.t = struct
   and match_list mconf env tbox sg pats xs =
     Debug.match_list sg pats xs;
     try
-      List.fold_left2
+      E.Args.fold_left2
         (fun sb_l pat arg ->
            List.fold_left
              (fun acc sg ->

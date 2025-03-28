@@ -1560,7 +1560,8 @@ let extract_term r terms =
 
 let extract_constraints terms domain int_domain uf r t =
   match E.term_view t with
-  | { f = Op op; xs = [ x; y ]; _ } -> (
+  | { f = Op op; xs; _ } when E.Args.is_pair xs -> (
+      let x, y = E.Args.to_pair xs in
       match extract_binop op with
       | Some mk ->
         let rx, exx = Uf.find uf x
@@ -2298,7 +2299,8 @@ let add env uf r t =
   match X.type_info r with
   | Tint -> (
       match E.term_view t with
-      | { f = Op BV2Nat ; xs = [ x ] ; _ } ->
+      | { f = Op BV2Nat ; xs; _ } ->
+        let x = E.Args.to_expr xs in
         let bvconv = Uf.GlobalDomains.find (module BV2Nat) ds in
         let rx, ex = Uf.find uf x in
         let bvconv = BV2Nat.add_bv2nat ~ex r rx bvconv in
@@ -2310,7 +2312,8 @@ let add env uf r t =
     )
   | Tbitv _ -> (
       match E.term_view t with
-      | { f = Op (Int2BV _) ; xs = [ x ]; _ } ->
+      | { f = Op (Int2BV _) ; xs; _ } ->
+        let x = E.Args.to_expr xs in
         let bvconv = Uf.GlobalDomains.find (module BV2Nat) ds in
         let rx, ex = Uf.find uf x in
         let bvconv = BV2Nat.add_int2bv ~ex r rx bvconv in

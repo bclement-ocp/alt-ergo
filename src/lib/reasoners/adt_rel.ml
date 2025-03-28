@@ -277,13 +277,11 @@ let calc_destructor d e uf =
   | _ ->
     None
 
-let delayed_destructor uf op = function
-  | [e] ->
-    begin match op with
-      | Sy.Destruct d ->
-        calc_destructor d e uf
-      | _ -> assert false
-    end
+let delayed_destructor uf op args =
+  let e = E.Args.to_expr args in
+  match op with
+  | Sy.Destruct d ->
+    calc_destructor d e uf
   | _ -> assert false
 
 let is_ready r =
@@ -470,7 +468,8 @@ let build_constr_eq r c =
         let ds =
           try Ty.assoc_destrs c cases with Not_found -> assert false
         in
-        let xs = List.map (fun (_, ty) -> E.fresh_name ty) ds in
+        let xs = Array.map (fun (_, ty) -> E.fresh_name ty) ds in
+        let xs = E.Args.of_array xs in
         let cons = E.mk_constr c xs ty in
         (* XXX: we do not propagate the context of X.make to the matching
            environment. It could be better to do it. See issue
@@ -556,7 +555,7 @@ let constr_of_destr ty d =
         let r =
           List.find
             (fun Ty.{ destrs; _ } ->
-               List.exists (fun (d', _) -> DE.Term.Const.equal d d') destrs
+               Array.exists (fun (d', _) -> DE.Term.Const.equal d d') destrs
             ) cases
         in
         r.constr

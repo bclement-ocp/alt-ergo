@@ -41,7 +41,7 @@ type decl_kind =
 
 type term_view = private {
   f: Symbols.t;
-  xs: t list;
+  xs: args;
   ty: Ty.t;
   bind : bind_kind;
   tag: int;
@@ -57,6 +57,8 @@ type term_view = private {
   pure : bool;
   mutable neg : t option
 }
+
+and args
 
 and bind_kind =
   | B_none
@@ -108,7 +110,7 @@ and quantified = private {
 
       This list has to be ordered for the skolemization. *)
 
-  sko_v : t list;
+  sko_v : args;
   (** Set of all the free variables of the quantified formula. In other words,
       this set is always the complementary of [binders] in the set of
       free variables of [main].
@@ -116,7 +118,7 @@ and quantified = private {
       The purpose of this field is to retrieve these variables quickly while
       performing the lazy skolemization in the SAT solver (see [skolemize]). *)
 
-  sko_vty : Ty.t list;
+  sko_vty : Ty.t array;
   (** The set of free type variables. In particular this set is always
       empty if we are the top level. *)
 
@@ -155,6 +157,59 @@ and trigger = private {
   from_user : bool;
 }
 
+type expr = t
+
+module Args : sig
+  type t = args
+
+  val print : t Fmt.t
+
+  val compare : t -> t -> int
+
+  val length : t -> int
+
+  val empty : t
+
+  val is_empty : t -> bool
+
+  val of_expr : expr -> t
+  val to_expr : t -> expr
+  val is_expr : t -> bool
+
+  val of_pair : expr * expr -> t
+  val to_pair : t -> expr * expr
+  val is_pair : t -> bool
+
+  val of_triple : expr * expr * expr -> t
+  val to_triple : t -> expr * expr * expr
+
+  val of_quadruple : expr * expr * expr * expr -> t
+  val to_quadruple : t -> expr * expr * expr * expr
+
+  val map : (expr -> expr) -> t -> t
+
+  val of_list : expr list -> t
+
+  val of_array : expr array -> t
+
+  val of_list_map : ('a -> expr) -> 'a list -> t
+
+  val to_list : t -> expr list
+
+  val to_array : t -> expr array
+
+  val fold_right : (expr -> 'a -> 'a) -> t -> 'a -> 'a
+  val fold_left : ('a -> expr -> 'a) -> 'a -> t -> 'a
+
+  val fold_left2 : ('a -> expr -> expr -> 'a) -> 'a -> t -> t -> 'a
+
+  val for_all : (expr -> bool) -> t -> bool
+
+  val init : int -> (int -> expr) -> t
+
+  val type_info : t -> Ty.t list
+end
+
 module Table : Hashtbl.S with type key = t
 module Set : Set.S with type elt = t
 module Map : Map.S with type key = t
@@ -163,9 +218,9 @@ type subst = t Var.Map.t * Ty.subst
 
 type lit_view = private
   | Eq of t * t
-  | Eql of t list
-  | Distinct of t list
-  | Builtin of bool * Symbols.builtin * t list
+  | Eql of args
+  | Distinct of args
+  | Builtin of bool * Symbols.builtin * args
   | Pred of t * bool
 
 type form_view = private
@@ -245,7 +300,16 @@ val print_tagged_classes : Format.formatter -> Set.t list -> unit
 (** smart constructors for terms *)
 
 val mk_trigger : ?user:bool -> ?depth:int -> ?hyp:t list -> t list -> trigger
-val mk_term : Symbols.t -> t list -> Ty.t -> t
+val mk_term : Symbols.t -> args -> Ty.t -> t
+val symbol : Symbols.t -> Ty.t -> t
+val name :
+  ?kind:Symbols.name_kind ->
+  ?defined:bool ->
+  ?ns:Symbols.name_space ->
+  string ->
+  Ty.t ->
+  t
+val binary : ty:Ty.t -> Symbols.t -> t -> t -> t
 val vrai : t
 val faux : t
 val void : t
@@ -269,8 +333,8 @@ val pred : t -> t
 (** smart constructors for literals *)
 
 val mk_eq : iff:bool -> t -> t -> t
-val mk_distinct : iff:bool -> t list -> t
-val mk_builtin : is_pos:bool -> Symbols.builtin -> t list -> t
+val mk_distinct : iff:bool -> args -> t
+val mk_builtin : is_pos:bool -> Symbols.builtin -> args -> t
 
 (** simple smart constructors for formulas *)
 
@@ -284,7 +348,7 @@ val mk_ite : t -> t -> t -> t
 
 (** smart constructor for datatypes. *)
 
-val mk_constr : Dolmen.Std.Expr.term_cst -> t list -> Ty.t -> t
+val mk_constr : Dolmen.Std.Expr.term_cst -> args -> Ty.t -> t
 (** [mk_constr c args ty] converts the Dolmen constructor [c] into
     an expression with arguments [args].
 

@@ -43,7 +43,7 @@ module Pp_smtlib_term = struct
 
   let rec print fmt t =
     let {Expr.f;xs; _} = Expr.term_view t in
-    match f, xs with
+    match f, E.Args.to_list xs with
 
     | Sy.Lit lit, xs ->
       begin
@@ -197,7 +197,7 @@ module Pp_smtlib_term = struct
     | _, [] ->
       fprintf fmt "%a" Sy.print f
 
-    | _, _ ->
+    | _, xs ->
       if Options.get_output_smtlib () then
         fprintf fmt "(%a %a)" Sy.print f print_list xs
       else
