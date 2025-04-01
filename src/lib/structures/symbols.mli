@@ -197,6 +197,8 @@ val compare_bounds : bound -> bound -> int
 val compare_operators : operator -> operator -> int
 val hash : t -> int
 
+val hash_bound : bound -> int
+
 val to_string : t -> string
 val print : t Fmt.t
 (* Printer used by debugging messages. *)

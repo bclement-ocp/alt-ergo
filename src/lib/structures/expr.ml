@@ -127,6 +127,12 @@ type form_view =
 
 (** Comparison and hashing functions *)
 
+let mask = 0xffffffff
+
+let hash t = t.tag lsr 32
+
+let uid t = t.tag land mask
+
 (* We keep true and false as repr * ordering is influenced by
    depth. Constants are smaller. Otherwise, we compare tag1 - tag2 so
    that fresh vars will be smaller *)
@@ -136,13 +142,9 @@ let compare t1 t2 =
   else
     let c = t1.depth - t2.depth in
     if c <> 0 then c
-    else t1.tag - t2.tag
+    else uid t1 - uid t2
 
 let equal t1 t2 =  t1 == t2
-
-let hash t = t.tag
-
-let uid t = t.tag
 
 let compare_subst (s_t1, s_ty1) (s_t2, s_ty2) =
   let c = Ty.compare_subst s_ty1 s_ty2 in
@@ -277,14 +279,72 @@ module H = struct
 
   let equal = eq
 
-  let hash t =
+  let rec hash t =
     abs @@
     List.fold_left
-      (fun acc x-> acc * 23 + x.tag)
-      (7 * Hashtbl.hash t.bind + 5 * Sy.hash t.f + Ty.hash t.ty)
+      (fun acc x-> acc * 23 + hash x)
+      (7 * hash_bind_kind t.bind + 5 * Sy.hash t.f + Ty.hash t.ty)
       t.xs
 
-  let set_id tag x = {x with tag = tag}
+  and hash_bind_kind = function
+    | B_none -> Hashtbl.hash 0
+    | B_lemma q -> 4 * hash_quantified q + 1
+    | B_skolem q -> 4 * hash_quantified q + 2
+    | B_let letin -> 4 * hash_letin letin + 3
+
+  and hash_quantified
+    { name; main; toplevel; user_trs; binders; sko_v; sko_vty; loc = _; kind }
+  =
+    Hashtbl.hash (
+      Hashtbl.hash name,
+      hash main,
+      Hashtbl.hash toplevel,
+      List.map hash_trigger user_trs,
+      Var.Map.fold (fun v ty acc ->
+        acc * 7 + Var.hash v * 3 + Ty.hash ty
+      ) binders 1,
+      List.map hash sko_v,
+      Hashtbl.hash (List.map Ty.hash sko_vty),
+      hash_decl_kind kind
+    )
+
+  and hash_decl_kind = function
+    | Dtheory -> Hashtbl.hash 0
+    | Daxiom -> Hashtbl.hash 1
+    | Dgoal -> Hashtbl.hash 2
+    | Dpredicate t -> Hashtbl.hash (3, hash t)
+    | Dfunction t -> Hashtbl.hash (4, hash t)
+    | Dobjective -> Hashtbl.hash 5
+
+  and hash_letin { let_v; let_e; in_e; let_sko; is_bool = _ } =
+    Hashtbl.hash
+      (Var.hash let_v, hash let_e, hash in_e, hash let_sko)
+
+  and hash_trigger { content; semantic; hyp; t_depth; from_user } =
+    Hashtbl.hash (
+      List.map hash content,
+      List.map hash_semantic_trigger semantic,
+      List.map hash hyp,
+      t_depth,
+      from_user
+    )
+
+  and hash_semantic_trigger = function
+    | Interval (t, lb, ub) ->
+      Hashtbl.hash (0, hash t, Sy.hash_bound lb, Sy.hash_bound ub)
+    | MapsTo (v, t) ->
+      Hashtbl.hash (1, Var.hash v, hash t)
+    | NotTheoryConst t ->
+      Hashtbl.hash (2, hash t)
+    | IsTheoryConst t ->
+      Hashtbl.hash (3, hash t)
+    | LinearDependency (t1, t2) ->
+      Hashtbl.hash (4, hash t1, hash t2)
+
+  let set_id uid x =
+    assert (0 <= uid && uid < mask);
+    let tag = uid lor (hash x lsl 32) in
+    { x with tag }
 
   let initial_size = 9001
 

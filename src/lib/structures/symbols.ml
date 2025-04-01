@@ -106,8 +106,16 @@ let compare_name_space ns1 ns2 =
 
 type bound_kind = Unbounded | VarBnd of Var.t | ValBnd of Numbers.Q.t
 
+let hash_bound_kind = function
+  | Unbounded -> Hashtbl.hash 0
+  | VarBnd v -> Hashtbl.hash (1, Var.hash v)
+  | ValBnd q -> Hashtbl.hash (2, Numbers.Q.hash q)
+
 type bound = (* private *)
   { kind : bound_kind; sort : Ty.t; is_open : bool; is_lower : bool }
+
+let hash_bound { kind; sort; is_open; is_lower } =
+  Hashtbl.hash (hash_bound_kind kind, Ty.hash sort, is_open, is_lower)
 
 type t =
   | True

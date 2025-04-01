@@ -148,11 +148,21 @@ struct
 
   (* begin: Hashconsing modules and functions *)
 
+  let mask = 0xffffffff
+
+  let hash v = v.id lsr 32
+
+  let uid v = v.id land mask
+
+  let equal a b = uid a = uid b
+
+  let hash_cmp a b =
+    (* Compare structural hashes first, then hashconsing tags *)
+    Int.compare a.id b.id
+
   module View = struct
 
     type elt = r
-
-    let set_id tag r = { r with id=tag }
 
     let hash r =
       let res = match r.v with
@@ -163,6 +173,11 @@ struct
         | Term t -> 8 + 10 * Expr.hash t
       in
       abs res
+
+    let set_id tag r =
+      assert (0 <= tag && tag < mask);
+      let tag = tag lor (hash r lsl 32) in
+      { r with id=tag }
 
     let eq  r1 r2 =
       match r1.v, r2.v with
@@ -281,12 +296,6 @@ struct
        | Adt x -> ADT.hash x
 
    ***)
-
-  let equal a b = a.id = b.id
-
-  let hash v = v.id
-
-  let hash_cmp a b = a.id - b.id
 
   (*
     should be called hash_cmp and used where structural_compare is
