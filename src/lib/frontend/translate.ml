@@ -34,17 +34,6 @@ let unsupported msg =
     (fun str -> Errors.(run_error (Unsupported_feature str)))
     msg
 
-type id = Id : 'a DE.id -> id[@@unboxed]
-
-module HT =
-  Hashtbl.Make (struct
-    type t = id
-
-    let equal (Id id1) (Id id2) = DE.Id.equal id1 id2
-
-    let hash (Id i)= DE.Id.hash i
-  end)
-
 (** Helper function: returns the basename of a dolmen path, since in AE
     the problems are contained in one-file (for now at least), the path is
     irrelevant and only the basename matters *)
@@ -62,95 +51,46 @@ let get_basename = function
           | _ -> ()
         ) path
 
-module Cache = struct
+let ae_ty_tag : Ty.t DStd.Tag.t =
+  DStd.Tag.create ~print:(P Ty.pp_smtlib) ()
 
-  let ae_sy_ht: Sy.t HT.t = HT.create 100
+let ae_sy_tag : Sy.t DStd.Tag.t =
+  DStd.Tag.create ~print:(P Sy.print) ()
 
-  let ae_ty_ht: Ty.t HT.t = HT.create 100
+let declare_ty_vars (ty_vars : DE.ty_var list) =
+  List.iter (fun ty_var ->
+      DE.Id.set_tag ty_var ae_ty_tag (Tvar ty_var)
+    ) ty_vars
 
-  let store_sy id sy =
-    HT.add ae_sy_ht (Id id) sy
+let skolemize_ty_vars (ty_csts : DE.ty_var list) =
+  List.iter (fun ty_cst ->
+      DE.Id.set_tag ty_cst ae_ty_tag (Ty.fresh_empty_text ())
+    ) ty_csts
 
-  let store_ty id ty =
-    HT.add ae_ty_ht (Id id) ty
+let skolemize_term_vars (term_vars : DE.term_var list) =
+  List.iter (fun (term_var : DE.term_var) ->
+      let name = get_basename term_var.path in
+      DE.Id.set_tag term_var ae_sy_tag (Sy.name name)
+    ) term_vars
 
-  let find_sy id =
-    HT.find ae_sy_ht (Id id)
+let get_ae_sy (term_cst : DE.term_cst) =
+  match DE.Id.get_tag term_cst ae_sy_tag with
+  | None ->
+    Fmt.failwith "Internal error: unknown constructor '%a'"
+      DE.Term.Const.print term_cst
+  | Some sy -> sy
 
-  let find_var ind =
-    match find_sy ind with
-    | Sy.Var v -> v
-    | sym ->
-      Fmt.failwith
-        "Internal error: Expected to find a variable symbol,\
-         instead found (%a)"
-        Sy.print sym
-
-  let store_var ind v =
-    store_sy ind (Sy.var v)
-
-  let find_ty id =
-    HT.find ae_ty_ht (Id id)
-
-  let fresh_ty ?(is_var = true) () =
-    if is_var
-    then Ty.fresh_tvar ()
-    else Ty.fresh_empty_text ()
-
-  let update_ty_store_ret ?(is_var = true) id =
-    let ty = fresh_ty ~is_var () in
-    store_ty id ty;
-    ty
-
-  let find_update_ty ?(is_var = true) id =
-    match HT.find_opt ae_ty_ht (Id id) with
-    | Some ty -> ty
-    | None ->
-      update_ty_store_ret ~is_var id
-
-  let store_tyv ?(is_var = true) t_v =
-    let ty = fresh_ty ~is_var () in
-    store_ty t_v ty
-
-  let store_tyvl ?(is_var = true) (tyvl: DE.ty_var list) =
-    List.iter (store_tyv ~is_var) tyvl
-
-  let store_tyv_ret ?(is_var = true) t_v =
-    update_ty_store_ret ~is_var t_v
-
-  let store_tyvl_ret ?(is_var = true) (tyvl: DE.ty_var list) =
-    List.map (store_tyv_ret ~is_var) tyvl
-
-  let store_sy_vl_names (tvl: DE.term_var list) =
-    List.iter (
-      fun ({ DE.path; _ } as tv) ->
-        let name = get_basename path in
-        store_sy tv (Sy.name name)
-    ) tvl
-
-  let store_ty_vars ?(is_var = true) ty =
-    match DT.view ty with
-    | `Var ty_v ->
-      store_tyv ~is_var ty_v
-    | `Pi (tyvl, _) ->
-      store_tyvl ~is_var tyvl
-    | _-> ()
-
-  let store_ty_vars_ret ?(is_var = true) ty =
-    match DT.view ty with
-    | `Var ty_v ->
-      [store_tyv_ret ~is_var ty_v]
-    | `Pi (tyvl, _) ->
-      store_tyvl_ret ~is_var tyvl
-    | _-> []
-  (* Assumes that the two cases are the only cases in which type variables are
-     introduced *)
-
-  let clear () =
-    HT.clear ae_sy_ht;
-    HT.clear ae_ty_ht
-
-end
+let get_ae_var (term_var : DE.term_var) =
+  match DE.Id.get_tag term_var ae_sy_tag with
+  | Some (Var v) -> v
+  | None ->
+    Fmt.failwith "Internal error: unknown variable '%a'"
+      DE.Term.Var.print term_var
+  | Some sy ->
+    Fmt.failwith
+      "Internal error: Expected to find a variable symbol,\
+       instead found (%a)"
+      Sy.print sy
 
 (** Builtins *)
 type _ DStd.Builtin.t +=
@@ -196,7 +136,7 @@ let fpa_rounding_mode, rounding_modes, add_rounding_modes =
                  (module Dl.Typer.T) env c) map)
         map constrs
     in
-    Cache.store_ty ty_cst Fpa_rounding.fpa_rounding_mode;
+    DE.Id.set_tag ty_cst ae_ty_tag Fpa_rounding.fpa_rounding_mode;
     Fpa_rounding.fpa_rounding_mode_dty,
     constrs,
     fun map ->
@@ -470,22 +410,16 @@ let builtins =
        | r -> r)
   | _ -> fun _ _ -> `Not_found
 
-(** clears the cache in the [Cache] module. *)
-let clear_cache () = Cache.clear ()
-
-(** [dty_to_ty update is_var subst tyv_substs dty]
+(** [dty_to_ty ?is_var subst tyv_substs dty]
 
     Converts a Dolmen type to an Alt-Ergo type.
-    - If [update] is [true] then for each type variable of type [DE.Ty.Var.t],
-      if it was not encountered before, a new type variable of type [Ty.t] is
-      created and added to the cache.
-    - If [dty] is a type application, or an arrow type, only its return type
-      is converted since those have no counterpart in AE's [Ty] module. The
-      function arguments' types or the type paramters ought to be converted
-      individually.
+    If [dty] is a type application, or an arrow type, only its return type
+    is converted since those have no counterpart in AE's [Ty] module. The
+    function arguments' types or the type paramters ought to be converted
+    individually.
 *)
-let rec dty_to_ty ?(update = false) ?(is_var = false) dty =
-  let aux = dty_to_ty ~update ~is_var in
+let rec dty_to_ty ?(is_var = false) dty =
+  let aux = dty_to_ty ~is_var in
   match DT.view dty with
   | `Prop | `App (`Builtin B.Prop, []) -> Ty.Tbool
   | `Int  | `App (`Builtin B.Int, []) -> Ty.Tint
@@ -499,65 +433,121 @@ let rec dty_to_ty ?(update = false) ?(is_var = false) dty =
     Ty.Tbitv n
 
   | `App (`Builtin B.Unit, []) -> Ty.tunit
-  | `App (`Builtin _, [ty]) -> aux ty
-  | `App (`Generic c, l) -> handle_ty_app ~update c l
+  | `App (`Generic c, l) -> handle_ty_app c l
 
-  | `Var ty_v when update ->
-    Cache.find_update_ty ty_v
-  | `Var ty_v ->
-    Cache.find_ty ty_v
+  | `Var ty_v -> (
+      match DE.Id.get_tag ty_v ae_ty_tag with
+      | Some ae_type -> ae_type
+      | None ->
+        Fmt.failwith "Internal error: type variable '%a' is not in scope."
+          DE.Ty.Var.print ty_v
+    )
 
-  | `Arrow (_, ty) -> aux ty
-  | `Pi (tyvl, ty) ->
-    if update then
-      Cache.store_tyvl ~is_var tyvl;
-    aux ty
   | _ -> unsupported "Type %a" DE.Ty.print dty
 
-and handle_ty_app ?(update = false) ty_c l =
-  let tyl = List.map (dty_to_ty ~update) l in
+and handle_ty_app ty_c l =
+  let tyl = List.map dty_to_ty l in
   (* Recover the initial versions of the types and apply them on the provided
      type arguments stored in [tyl]. *)
-  match Cache.find_ty ty_c with
-  | Tadt (hs, _) -> Tadt (hs, tyl )
-  | Text (_, s) -> Text (tyl, s)
+  match DE.Id.get_tag ty_c ae_ty_tag with
+  | Some Tadt (hs, _) -> Tadt (hs, tyl )
+  | Some Text (_, s) -> Text (tyl, s)
   | _ -> assert false
 
-(** Handles a simple type declaration. *)
-let mk_ty_decl (ty_c: DE.ty_cst) =
-  match DT.definition ty_c with
-  | Some (Adt { cases; _ } as adt) ->
-    Nest.attach_orders [adt];
-    let tyvl = Cache.store_ty_vars_ret cases.(0).cstr.id_ty in
-    Cache.store_ty ty_c (Ty.t_adt ty_c tyvl);
-    let cs =
-      Array.fold_right (
-        fun DE.{ cstr; dstrs; _ } accl ->
-          let fields =
-            Array.fold_right (
-              fun tc_o acc ->
-                match tc_o with
-                | Some (DE.{ id_ty; _ } as field) ->
-                  (field, dty_to_ty id_ty) :: acc
-                | None -> assert false
-            ) dstrs []
-          in
-          (cstr, fields) :: accl
-      ) cases []
-    in
-    let ty = Ty.t_adt ~body:(Some cs) ty_c tyvl in
-    Cache.store_ty ty_c ty
+let process_ty_decls (ty_decls : (DE.ty_cst * DE.ty_def option) list) =
+  (* Declare all types and keep only algebraic data types. *)
+  let adts =
+    List.filter_map (fun (ty_cst, ty_def) ->
+        match (ty_def : DE.ty_def option) with
+        | Some (Adt { cases; _ } as adt) -> (
+            let tyvl =
+              match DT.view (DE.Term.Const.ty cases.(0).cstr) with
+              | `Pi (tyvl, _) -> tyvl
+              | _ -> []
+            in
+            assert (List.length tyvl = DE.Ty.Const.arity ty_cst);
+            let ty_vars =
+              List.map (fun ty_var ->
+                  let ae_type : Ty.t = Tvar ty_var in
+                  DE.Id.set_tag ty_var ae_ty_tag ae_type;
+                  ae_type
+                ) tyvl
+            in
+            DE.Id.set_tag ty_cst ae_ty_tag (Ty.t_adt ty_cst ty_vars);
+            Some (ty_cst, adt)
+          )
+        | None | Some Abstract ->
+          (* XXX: type parameters are dropped, is this right? *)
+          let ty = Ty.text [] ty_cst in
+          DE.Id.set_tag ty_cst ae_ty_tag ty;
+          None
+      ) ty_decls
+  in
 
-  | None | Some Abstract ->
-    let ty_params = []
-    (* List.init ty_c.id_ty.arity (fun _ -> Ty.fresh_tvar ()) *)
-    in
-    let ty = Ty.text ty_params ty_c in
-    Cache.store_ty ty_c ty
+  (* Record ADT constructor order with the [Nest] module. *)
+  Nest.attach_orders (List.map snd adts);
+
+  (* Compute ADT definitions *)
+  List.iter (fun (ty_cst, ty_def) ->
+      match (ty_def : DE.ty_def) with
+      | Abstract ->
+        (* Removed in the first pass. *)
+        assert false
+      | Adt { cases; _ } ->
+        let tyvl =
+          match DT.view (DE.Term.Const.ty cases.(0).cstr) with
+          | `Pi (tyvl, _) -> tyvl
+          | _ -> []
+        in
+        assert (List.length tyvl = DE.Ty.Const.arity ty_cst);
+        let ty_vars =
+          List.map (fun ty_var ->
+              let ae_type : Ty.t = Tvar ty_var in
+              DE.Id.set_tag ty_var ae_ty_tag ae_type;
+              ae_type
+            ) tyvl
+        in
+        let cs =
+          Array.fold_right (
+            fun DE.{ cstr; dstrs; _ } accl ->
+              let fields =
+                Array.fold_right (
+                  fun tc_o acc ->
+                    match tc_o with
+                    | None -> assert false
+                    | Some field ->
+                      (* TODO: explain the expected shape *)
+                      let field_ty = DE.Term.Const.ty field in
+                      let field_tyvl, field_ty =
+                        match DT.view field_ty with
+                        | `Pi (field_tyvl, field_ty) -> field_tyvl, field_ty
+                        | _ -> [], field_ty
+                      in
+                      assert (
+                        List.length field_tyvl = List.length tyvl &&
+                        List.for_all2 DE.Id.equal tyvl field_tyvl
+                      );
+                      match DT.view field_ty with
+                      | `Arrow (_, field_ty) ->
+                        (field, dty_to_ty field_ty) :: acc
+                      | _ ->
+                        Fmt.failwith
+                          "Internal error: destructor %a is not a function."
+                          DE.Term.Const.print field
+                ) dstrs []
+              in
+              (cstr, fields) :: accl
+          ) cases []
+        in
+        (* This call to [t_adt] will record the definition associated with
+           [ty_cst], but we can still use the type from the previous call to
+           [t_adt] without a [~body]. *)
+        ignore (Ty.t_adt ~body:(Some cs) ty_cst ty_vars)
+    ) adts
 
 (** Handles term declaration by storing the eventual present type variables
     in the cache as well as the symbol associated to the term. *)
-let mk_term_decl ({ id_ty; path; tags; _ } as tcst: DE.term_cst) =
+let mk_term_decl ({ path; tags; _ } as tcst: DE.term_cst) =
   let name = get_basename path in
   let sy =
     begin match DStd.Tag.get tags DE.Tags.ac with
@@ -565,77 +555,31 @@ let mk_term_decl ({ id_ty; path; tags; _ } as tcst: DE.term_cst) =
       | _ -> Sy.name name
     end
   in
-  Cache.store_sy tcst sy;
+  DE.Id.set_tag tcst ae_sy_tag sy;
   (* Adding polymorphic types to the cache. *)
-  Cache.store_ty_vars id_ty;
+  let ty = DE.Term.Const.ty tcst in
+  let ty =
+    match DT.view (DE.Term.Const.ty tcst) with
+    | `Pi (tyvl, ty) ->
+      declare_ty_vars tyvl;
+      ty
+    | _ -> ty
+  in
   let arg_tys, ret_ty =
-    match DT.view id_ty with
+    match DT.view ty with
     | `Arrow (arg_tys, ret_ty) ->
       List.map dty_to_ty arg_tys, dty_to_ty ret_ty
-    | _ -> [], dty_to_ty id_ty
+    | _ -> [], dty_to_ty ty
   in
   (Hstring.make name, arg_tys, ret_ty)
-
-(** Handles the definitions of a list of mutually recursive types. *)
-let mk_mr_ty_decls (tdl: DE.ty_cst list) =
-  let handle_ty_decl (ty: Ty.t) (tdef: DE.Ty.def option) =
-    match ty, tdef with
-    | Tadt (hs, tyl), Some (Adt { cases; ty = ty_c; _ }) ->
-      let cs =
-        Array.fold_right (
-          fun DE.{ cstr; dstrs; _ } accl ->
-            let fields =
-              Array.fold_right (
-                fun tc_o acc ->
-                  match tc_o with
-                  | Some (DE.{ id_ty; _ } as id) ->
-                    (id, dty_to_ty id_ty) :: acc
-                  | None -> assert false
-              ) dstrs []
-            in
-            (cstr, fields) :: accl
-        ) cases []
-      in
-      let ty = Ty.t_adt ~body:(Some cs) hs tyl in
-      Cache.store_ty ty_c ty
-
-    | _ -> assert false
-  in
-  let rev_tdefs = List.rev_map (fun td -> Option.get @@ DT.definition td) tdl in
-  Nest.attach_orders rev_tdefs;
-  let rev_l =
-    List.fold_left (
-      fun acc tdef ->
-        match tdef with
-        | DE.Adt { cases; ty = ty_c; _ } as adt ->
-          let tyvl = Cache.store_ty_vars_ret cases.(0).cstr.id_ty in
-          let ty = Ty.t_adt ty_c tyvl in
-          Cache.store_ty ty_c ty;
-          (ty, Some adt) :: acc
-
-        | Abstract ->
-          assert false (* unreachable in the second iteration *)
-    ) [] (List.rev rev_tdefs)
-  in
-  List.iter (
-    fun (t, d) -> handle_ty_decl t d
-  ) (List.rev rev_l)
 
 (** Helper function hadle variables that are encoutered in patterns. *)
 let handle_patt_var id (DE.{ term_descr; _ } as term)  =
   match term_descr with
-  | Cst ({ builtin = B.Base; id_ty; _ } as ty_c) ->
-    let ty = dty_to_ty id_ty in
-    let v = Var.of_string @@ Fmt.to_to_string DE.Term.Const.print id in
-    let sy = Sy.Var v in
-    Cache.store_sy ty_c sy;
-    v, id, ty
-
   | Var ({ builtin = B.Base; id_ty; _ } as ty_v) ->
     let ty = dty_to_ty id_ty in
     let v = Var.of_string @@ Fmt.to_to_string DE.Term.Const.print id in
-    let sy = Sy.Var v in
-    Cache.store_sy ty_v sy;
+    DE.Id.set_tag ty_v ae_sy_tag (Sy.var v);
     v, id, ty
 
   | _ ->
@@ -701,8 +645,7 @@ end = struct
       (* Should the type be passed as an argument
          instead of re-evaluating it here? *)
       let v = Var.of_string (get_basename path) in
-      let sy = Sy.var v in
-      Cache.store_sy t_v sy;
+      DE.Id.set_tag t_v ae_sy_tag (Sy.var v);
       (* Adding the matched variable to the store *)
       Var v
 
@@ -786,7 +729,7 @@ let parse_semantic_bound ?(loc = DStd.Loc.dummy) ~var b x y =
     match term_descr with
     | Cst { builtin = (B.Integer s | B.Rational s | B.Decimal s); _ } ->
       Sy.ValBnd (Numbers.Q.from_string s)
-    | Var v -> Sy.VarBnd (Cache.find_var v)
+    | Var v -> Sy.VarBnd (get_ae_var v)
     | _ ->
       Fmt.failwith
         "%aInternal error: invalid semantic bound"
@@ -888,7 +831,7 @@ let rec mk_expr
             E.bitv s ty
 
           | B.Base ->
-            let sy = Cache.find_sy tcst in
+            let sy = get_ae_sy tcst in
             let ty = dty_to_ty term_ty in
             E.mk_term sy [] ty
 
@@ -901,7 +844,7 @@ let rec mk_expr
 
       | Var ({ id_ty; _ } as ty_v) ->
         let ty = dty_to_ty id_ty in
-        let sy = Cache.find_sy ty_v in
+        let sy = get_ae_sy ty_v in
         E.mk_term sy [] ty
 
       | App (
@@ -934,8 +877,8 @@ let rec mk_expr
                     let ty = dty_to_ty term_ty in
                     let e = aux_mk_expr x in
                     let sy =
-                      match Cache.find_ty adt with
-                      | Tadt _ -> Sy.destruct destr
+                      match DE.Id.get_tag adt ae_ty_tag with
+                      | Some Tadt _ -> Sy.destruct destr
                       | _ -> assert false
                     in
                     E.mk_term sy [e] ty
@@ -962,8 +905,8 @@ let rec mk_expr
                   ) -> ty_c
                 | _ -> assert false
               in
-              match Cache.find_ty ty_c with
-              | Ty.Tadt _ ->
+              match DE.Id.get_tag ty_c ae_ty_tag with
+              | Some Ty.Tadt _ ->
                 E.mk_tester cstr (aux_mk_expr x)
 
               | _ -> assert false
@@ -1057,7 +1000,7 @@ let rec mk_expr
 
           | B.Base, _ ->
             let ty = dty_to_ty term_ty in
-            let sy = Cache.find_sy tcst in
+            let sy = get_ae_sy tcst in
             let l = List.map (fun t -> aux_mk_expr t) args in
             E.mk_term sy l ty
 
@@ -1296,7 +1239,7 @@ let rec mk_expr
             fun ({ DE.path; _ } as tv, t) ->
               let name = get_basename path in
               let v = Var.of_string name in
-              Cache.store_sy tv (Sy.var v);
+              DE.Id.set_tag tv ae_sy_tag (Sy.var v);
               v, t
           ) ls
         in
@@ -1325,7 +1268,8 @@ let rec mk_expr
             DE.Term.print term
         else if tvl == []
         then begin
-          Cache.store_tyvl tyvl;
+          (* XXX: We are using type variables but maybe should skolemize? *)
+          declare_ty_vars tyvl;
           aux_mk_expr ~toplevel:true body
         end
         else
@@ -1334,7 +1278,7 @@ let rec mk_expr
             else Format.sprintf "#%s#sub-%d" name_base !name_tag
           in
           incr name_tag;
-          if tyvl != [] then Cache.store_tyvl tyvl;
+          declare_ty_vars tyvl;
 
           (* the following is done in two iterations to preserve the order *)
           (* quantified variables *)
@@ -1349,8 +1293,7 @@ let rec mk_expr
           let binders =
             List.fold_left (
               fun vl (ty, v, tv) ->
-                let sy = Sy.var v in
-                Cache.store_sy tv sy;
+                DE.Id.set_tag tv ae_sy_tag (Sy.var v);
                 Var.Map.add v ty vl
             ) Var.Map.empty ntvl
           in
@@ -1417,7 +1360,7 @@ let rec mk_expr
       assert (Option.is_none var);
       begin match x.term_descr with
         | Var t_v ->
-          let v = Cache.find_var t_v in
+          let v = get_ae_var t_v in
           let sy = Sy.mk_maps_to v in
           let e2 = aux_mk_expr y in
           E.mk_term sy [e2] Ty.Tbool
@@ -1490,7 +1433,7 @@ and make_trigger ?(loc = DStd.Loc.dummy) ~name_base ~decl_kind
              | Local { name } -> Var.local name
              | _ -> assert false
            in
-           Cache.store_var v var)
+           DE.Id.set_tag v ae_sy_tag (Sy.var var))
         qm_vars;
       e
     | e ->  e
@@ -1539,8 +1482,8 @@ let pp_query ?(hyps =[]) t =
   let rec elim_toplevel_forall bnot DE.({ term_descr;  _ } as t) =
     match term_descr with
     | Binder (Forall (tyvl, tvl), body) when bnot ->
-      Cache.store_tyvl ~is_var:false tyvl;
-      Cache.store_sy_vl_names tvl;
+      skolemize_ty_vars tyvl;
+      skolemize_term_vars tvl;
       elim_toplevel_forall bnot body
 
     | App (
@@ -1586,8 +1529,8 @@ let pp_query ?(hyps =[]) t =
       nx::axioms, goal
 
     | Binder (Forall (tyvl, tvl), body) ->
-      Cache.store_tyvl ~is_var:false tyvl;
-      Cache.store_sy_vl_names tvl;
+      skolemize_ty_vars tyvl;
+      skolemize_term_vars tvl;
       intro_hypothesis body
 
     | _ ->
@@ -1794,7 +1737,7 @@ let make file acc stmt =
           | `Term_def (_, ({ path; _ } as tcst), _, _, _) ->
             let name_base = get_basename path in
             let sy = Sy.name ~defined:true name_base in
-            Cache.store_sy tcst sy
+            DE.Id.set_tag tcst ae_sy_tag sy
           | `Type_alias _ -> ()
           | `Instanceof _ ->
             (* These statements are only used in models when completing a
@@ -1807,7 +1750,7 @@ let make file acc stmt =
       List.filter_map (fun (def : Typer_Pipe.def) ->
           match def with
           | `Term_def ( _, ({ path; tags; _ } as tcst), tyvars, terml, body) ->
-            Cache.store_tyvl tyvars;
+            declare_ty_vars tyvars;
             let name_base = get_basename path in
 
             let binders, defn =
@@ -1818,12 +1761,12 @@ let make file acc stmt =
                     let ty = dty_to_ty id_ty in
                     let v = Var.of_string (get_basename path) in
                     let sy = Sy.var v in
-                    Cache.store_sy tv sy;
+                    DE.Id.set_tag tv ae_sy_tag sy;
                     let e = E.mk_term sy [] ty in
                     Var.Map.add v ty binders, e :: acc
                 ) (Var.Map.empty, []) terml
               in
-              let sy = Cache.find_sy tcst in
+              let sy = get_ae_sy tcst in
               let e = E.mk_term sy (List.rev rev_args) rty in
               binders, e
             in
@@ -1883,8 +1826,8 @@ let make file acc stmt =
 
     | {contents = `Decls [td]; _ } ->
       begin match td with
-        | `Type_decl (td, _def) ->
-          mk_ty_decl td;
+        | `Type_decl (td, ty_def) ->
+          process_ty_decls [(td, ty_def)];
           acc
 
         | `Term_decl td ->
@@ -1899,26 +1842,15 @@ let make file acc stmt =
         *)
         match tdl with
         | `Term_decl td :: tl ->
-          begin match ty_decls with
-            | [] -> ()
-            | [otd] -> mk_ty_decl otd
-            | _ -> mk_mr_ty_decls (List.rev ty_decls)
-          end;
+          process_ty_decls ty_decls;
           C.{ st_decl = Decl (mk_term_decl td); st_loc } :: aux [] tl acc
 
-        | `Type_decl (td, _def) :: tl ->
-          aux (td :: ty_decls) tl acc
+        | `Type_decl (td, ty_def) :: tl ->
+          aux ((td, ty_def) :: ty_decls) tl acc
 
         | [] ->
-          begin
-            let () =
-              match ty_decls with
-              | [] -> ()
-              | [otd] -> mk_ty_decl otd
-              | _ ->  mk_mr_ty_decls (List.rev ty_decls)
-            in
-            acc
-          end
+          process_ty_decls ty_decls;
+          acc
       in
       aux [] dcl acc
 
