@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html class="writer-html5" lang="en">
 <head>
@@ -5,21 +7,17 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Changes &mdash; Alt-Ergo Documentation  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=19f00094" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
       <link rel="stylesheet" type="text/css" href="../_static/css/versions.css?v=21adeb6f" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script src="../_static/jquery.js?v=5d32c60e"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=b3ba4146"></script>
-        <script src="../_static/doctools.js?v=888ff710"></script>
-        <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
-        <script src="../_static/js/versions.js?v=40211404"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=b3ba4146"></script>
+      <script src="../_static/doctools.js?v=888ff710"></script>
+      <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
+      <script src="../_static/js/versions.js?v=40211404"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -52,6 +50,7 @@
 <li class="toctree-l1"><a class="reference internal" href="../SMT-LIB_language/index.html">SMT-LIB language</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Alt_ergo_native/index.html">Alt-Ergo's native language</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Model_generation.html">Model generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../Optimization.html">Optimization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../API/index.html">API documentation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Plugins/index.html">Plugins</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Dev/index.html">Developer's documentation</a></li>
@@ -59,8 +58,14 @@
 <li class="toctree-l2"><a class="reference internal" href="license.html">Licenses</a></li>
 <li class="toctree-l2 current"><a class="current reference internal" href="#">Changes</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="#unreleased">unreleased</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="#command-line-interface">Command-line interface</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#supported-features">Supported features</a></li>
 <li class="toctree-l4"><a class="reference internal" href="#smt-lib-support">SMT-LIB support</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#user-interface">User Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#v2-6-0">v2.6.0</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#command-line-interface">Command-line interface</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id1">SMT-LIB support</a></li>
 <li class="toctree-l4"><a class="reference internal" href="#model-generation">Model generation</a></li>
 <li class="toctree-l4"><a class="reference internal" href="#theory-reasoning">Theory reasoning</a></li>
 <li class="toctree-l4"><a class="reference internal" href="#internal-library-changes">Internal/library changes</a></li>
@@ -78,22 +83,22 @@
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="#v2-5-2">v2.5.2</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="#id1">Bug fixes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id2">Bug fixes</a></li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="#v2-5-1">v2.5.1</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="#id2">Bug fixes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id3">Bug fixes</a></li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="#v2-5-0">v2.5.0</a><ul>
 <li class="toctree-l4"><a class="reference internal" href="#new-features">New features</a></li>
-<li class="toctree-l4"><a class="reference internal" href="#id3">Build</a></li>
-<li class="toctree-l4"><a class="reference internal" href="#id4">Bug fixes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id4">Build</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id5">Bug fixes</a></li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="#v2-4-3-2023-04-14">v2.4.3 (2023-04-14)</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="#id5">Build</a></li>
-<li class="toctree-l4"><a class="reference internal" href="#id6">Bug fixes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id6">Build</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#id7">Bug fixes</a></li>
 <li class="toctree-l4"><a class="reference internal" href="#regression-fixes">Regression fixes</a></li>
 </ul>
 </li>
@@ -165,6 +170,28 @@ the <a class="reference external" href="https://github.com/OCamlPro/Alt-Ergo">of
 GitHub</a>.</p>
 <section id="unreleased">
 <h2>unreleased<a class="headerlink" href="#unreleased" title="Permalink to this heading"></a></h2>
+<section id="supported-features">
+<h3>Supported features<a class="headerlink" href="#supported-features" title="Permalink to this heading"></a></h3>
+<ul class="simple">
+<li><p>Remove the legacy Tableaux-CDCL solver, which is strictly worse than the
+Tableaux solver (#1309)</p></li>
+</ul>
+</section>
+<section id="smt-lib-support">
+<h3>SMT-LIB support<a class="headerlink" href="#smt-lib-support" title="Permalink to this heading"></a></h3>
+<ul class="simple">
+<li><p>Remove the legacy frontend and AB-Why3 plugin</p></li>
+</ul>
+</section>
+<section id="user-interface">
+<h3>User Interface<a class="headerlink" href="#user-interface" title="Permalink to this heading"></a></h3>
+<ul class="simple">
+<li><p>Interactive prompt when using interactive mode (#1310)</p></li>
+</ul>
+</section>
+</section>
+<section id="v2-6-0">
+<h2>v2.6.0<a class="headerlink" href="#v2-6-0" title="Permalink to this heading"></a></h2>
 <section id="command-line-interface">
 <h3>Command-line interface<a class="headerlink" href="#command-line-interface" title="Permalink to this heading"></a></h3>
 <ul class="simple">
@@ -180,10 +207,11 @@ compliant (#805)</p></li>
 <li><p>Add bare-bones support for interactive input in SMT-LIB format (#949)</p></li>
 <li><p>Less confusing behavior on timeout (#982, #984)</p></li>
 <li><p>Add <code class="docutils literal notranslate"><span class="pre">--strict</span></code> option for SMT-LIB compliant mode (#916, #1133)</p></li>
+<li><p>Deprecate <code class="docutils literal notranslate"><span class="pre">sum</span></code>, <code class="docutils literal notranslate"><span class="pre">typing</span></code> and <code class="docutils literal notranslate"><span class="pre">warnings</span></code> debug flags (#1204)</p></li>
 </ul>
 </section>
-<section id="smt-lib-support">
-<h3>SMT-LIB support<a class="headerlink" href="#smt-lib-support" title="Permalink to this heading"></a></h3>
+<section id="id1">
+<h3>SMT-LIB support<a class="headerlink" href="#id1" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>Add support for the many new SMT-LIB commands (#837, #848, #852, #863, #911,
 #942, #945, #961, #975, #1069)</p></li>
@@ -231,6 +259,13 @@ performance slightly (#1041)</p></li>
 <li><p>Rewrite the ADT theory to use domains and integrate the enum theory into the
 ADT theory (#1078, #1086, #1087, #1091, #1094, #1138)</p></li>
 <li><p>Rewrite the Intervals module entirely (#1108)</p></li>
+<li><p>Add maximize/minimize terms for matching (#1166)</p></li>
+<li><p>Internalize <code class="docutils literal notranslate"><span class="pre">sign_extend</span></code> and <code class="docutils literal notranslate"><span class="pre">repeat</span></code> (#1192)</p></li>
+<li><p>Run cross-propagators to completion (#1221)</p></li>
+<li><p>Support binary distinct on arbitrary bit-widths (#1222)</p></li>
+<li><p>Only perform optimization when building a model (#1224)</p></li>
+<li><p>Make sure domains do not overflow the default domain (#1225)</p></li>
+<li><p>Do not build unnormalized values in <code class="docutils literal notranslate"><span class="pre">zero_extend</span></code> (#1226)</p></li>
 </ul>
 </section>
 <section id="internal-library-changes">
@@ -258,6 +293,7 @@ during printing (#927)</p></li>
 <li><p>Preserve trigger order when parsing quantifiers with multiple trigger
 (#1046).</p></li>
 <li><p>Store domains inside the union-find module (#1119)</p></li>
+<li><p>Remove some polymorphic hashtables (#1219)</p></li>
 </ul>
 </section>
 <section id="build-and-integration">
@@ -268,6 +304,7 @@ during printing (#927)</p></li>
 registered through the dune-site plugin mechanism in the
 <code class="docutils literal notranslate"><span class="pre">(alt-ergo</span> <span class="pre">plugins)</span></code> site to be picked up by Alt-Ergo (#1049).</p></li>
 <li><p>Add a release workflow (#827)</p></li>
+<li><p>Add a Windows workflow (#1203)</p></li>
 <li><p>Mark the dune.inc file as linguist-generated to avoid huge diffs (#830)</p></li>
 <li><p>Use GitHub Actions badges in the README (#882)</p></li>
 <li><p>Use <code class="docutils literal notranslate"><span class="pre">dune</span> <span class="pre">build</span> <span class="pre">&#64;check</span></code> to build the project (#887)</p></li>
@@ -276,6 +313,9 @@ registered through the dune-site plugin mechanism in the
 <li><p>Use an efficient <code class="docutils literal notranslate"><span class="pre">String.starts_with</span></code> implementation (#912)</p></li>
 <li><p>Fix the Makefile (#914)</p></li>
 <li><p>Add <code class="docutils literal notranslate"><span class="pre">Logs</span></code> dependency (#1206)</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">dynamic_include</span></code> to include the generated file <code class="docutils literal notranslate"><span class="pre">dune.inc</span></code> (#1199)</p></li>
+<li><p>Support Windows (#1184,#1189,#1195,#1199,#1200)</p></li>
+<li><p>Wrap the library <code class="docutils literal notranslate"><span class="pre">Alt_ergo_prelude</span></code> (#1223)</p></li>
 </ul>
 </section>
 <section id="testing">
@@ -297,6 +337,9 @@ registered through the dune-site plugin mechanism in the
 <li><p>Documentation of the <code class="docutils literal notranslate"><span class="pre">Enum</span></code> theory (#871)</p></li>
 <li><p>Document <code class="docutils literal notranslate"><span class="pre">Th_util.lit_origin</span></code> (#915)</p></li>
 <li><p>Document the CDCL-Tableaux solver (#995)</p></li>
+<li><p>Document Windows support (#1216)</p></li>
+<li><p>Remove instructions to install Alt-Ergo on Debian (#1217)</p></li>
+<li><p>Document optimization feature (#1231)</p></li>
 </ul>
 </section>
 </section>
@@ -324,8 +367,8 @@ extensions (#1122)</p></li>
 </section>
 <section id="v2-5-2">
 <h2>v2.5.2<a class="headerlink" href="#v2-5-2" title="Permalink to this heading"></a></h2>
-<section id="id1">
-<h3>Bug fixes<a class="headerlink" href="#id1" title="Permalink to this heading"></a></h3>
+<section id="id2">
+<h3>Bug fixes<a class="headerlink" href="#id2" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>Hot fix for a soundness bug related with the <code class="docutils literal notranslate"><span class="pre">distinct</span></code> statement (#890)</p></li>
 <li><p>Treat missing values in models as abstract (#860)</p></li>
@@ -334,8 +377,8 @@ extensions (#1122)</p></li>
 </section>
 <section id="v2-5-1">
 <h2>v2.5.1<a class="headerlink" href="#v2-5-1" title="Permalink to this heading"></a></h2>
-<section id="id2">
-<h3>Bug fixes<a class="headerlink" href="#id2" title="Permalink to this heading"></a></h3>
+<section id="id3">
+<h3>Bug fixes<a class="headerlink" href="#id3" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>fix a critical soundness bug with bvnot primitive (#819)</p></li>
 </ul>
@@ -356,16 +399,16 @@ extensions (#1122)</p></li>
 <li><p>improve the ite preprocessing (simplification of some ites) (PR #731)</p></li>
 </ul>
 </section>
-<section id="id3">
-<h3>Build<a class="headerlink" href="#id3" title="Permalink to this heading"></a></h3>
+<section id="id4">
+<h3>Build<a class="headerlink" href="#id4" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>update to the new version of ocplib-simplex (0.5)</p></li>
 <li><p>remove the support of the deprecated library num. Alt-Ergo only uses Zarith (PR #600)</p></li>
 <li><p>remove the deprecated graphical interface (PR #601)</p></li>
 </ul>
 </section>
-<section id="id4">
-<h3>Bug fixes<a class="headerlink" href="#id4" title="Permalink to this heading"></a></h3>
+<section id="id5">
+<h3>Bug fixes<a class="headerlink" href="#id5" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>issue 475 – Catch the exception I_dont_known in instantiation pass of SatML (PR #478)</p></li>
 <li><p>fix a memory leak in the vector module (PR #606)</p></li>
@@ -374,8 +417,8 @@ extensions (#1122)</p></li>
 </section>
 <section id="v2-4-3-2023-04-14">
 <h2>v2.4.3 (2023-04-14)<a class="headerlink" href="#v2-4-3-2023-04-14" title="Permalink to this heading"></a></h2>
-<section id="id5">
-<h3>Build<a class="headerlink" href="#id5" title="Permalink to this heading"></a></h3>
+<section id="id6">
+<h3>Build<a class="headerlink" href="#id6" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>Restrict the requirement version of Ocplib-simplex (PR #573)</p></li>
 <li><p>Dune 3.0 or above required, see https://github.com/ocaml/dune/issues/5563 (PR #575)</p></li>
@@ -385,8 +428,8 @@ extensions (#1122)</p></li>
 <li><p>Using js_of_ocaml with a version between 4.0.1 and 5.0.1 required (PR #575)</p></li>
 </ul>
 </section>
-<section id="id6">
-<h3>Bug fixes<a class="headerlink" href="#id6" title="Permalink to this heading"></a></h3>
+<section id="id7">
+<h3>Bug fixes<a class="headerlink" href="#id7" title="Permalink to this heading"></a></h3>
 <ul class="simple">
 <li><p>Fix soundness issues in the arithmetic reasoner #476, #477, #479 (PR #573)</p></li>
 </ul>

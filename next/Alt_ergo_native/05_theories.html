@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html class="writer-html5" lang="en">
 <head>
@@ -5,21 +7,17 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Theories &mdash; Alt-Ergo Documentation  documentation</title>
-      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
-      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=19f00094" />
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
       <link rel="stylesheet" type="text/css" href="../_static/css/versions.css?v=21adeb6f" />
 
   
-  <!--[if lt IE 9]>
-    <script src="../_static/js/html5shiv.min.js"></script>
-  <![endif]-->
-  
-        <script src="../_static/jquery.js?v=5d32c60e"></script>
-        <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-        <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=b3ba4146"></script>
-        <script src="../_static/doctools.js?v=888ff710"></script>
-        <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
-        <script src="../_static/js/versions.js?v=40211404"></script>
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=b3ba4146"></script>
+      <script src="../_static/doctools.js?v=888ff710"></script>
+      <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
+      <script src="../_static/js/versions.js?v=40211404"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -76,6 +74,7 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="../Model_generation.html">Model generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../Optimization.html">Optimization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../API/index.html">API documentation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Plugins/index.html">Plugins</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../Dev/index.html">Developer's documentation</a></li>
@@ -121,8 +120,7 @@ A precise definition of what is meant here by ‘theory’ can be found in the s
 <li><p>Linear arithmetic over integers and rationals</p></li>
 <li><p>(Fragment of) non-linear arithmetic</p></li>
 <li><p>Floating-point arithmetic (as an extension)</p></li>
-<li><p>Enumerated datatypes</p></li>
-<li><p>Record datatypes</p></li>
+<li><p>Algebraic datatypes</p></li>
 <li><p>Polymorphic functional arrays</p></li>
 <li><p>Fixed-size bitvectors</p></li>
 </ul>
@@ -132,7 +130,6 @@ All theories are always considered <em>modulo equality</em>.</p>
 <li><p><code class="docutils literal notranslate"><span class="pre">SUM</span></code>: Enumerated datatypes</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">Adt</span></code>: Algebraic datatypes</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">Arrays</span></code>: Polymorphic functional arrays</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">Records</span></code>: Record datatypes</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">Bitv</span></code>: Fixed-size bitvectors</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">LIA</span></code>: Linear arithmetic over integers</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">LRA</span></code>: Linear arithmetic over rationals</p></li>
@@ -161,15 +158,15 @@ implementation of the three-tier strategy described in the paper (this is done
 automatically in Why3 when you use floats).</p>
 <p>The rounding function is available as a builtin function called <code class="docutils literal notranslate"><span class="pre">float</span></code>:</p>
 <div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="k">type</span> <span class="n">fpa_rounding_mode</span> <span class="o">=</span>
-  <span class="err">|</span> <span class="n">NearestTiesToEven</span>
+  <span class="o">|</span> <span class="n">NearestTiesToEven</span>
     <span class="c">(** To nearest, tie breaking to even mantissa *)</span>
-  <span class="err">|</span> <span class="n">ToZero</span>
+  <span class="o">|</span> <span class="n">ToZero</span>
     <span class="c">(** Round toward zero *)</span>
-  <span class="err">|</span> <span class="n">Up</span>
+  <span class="o">|</span> <span class="n">Up</span>
     <span class="c">(** Round toward plus infinity *)</span>
-  <span class="err">|</span> <span class="n">Down</span>
+  <span class="o">|</span> <span class="n">Down</span>
     <span class="c">(** Round toward minus infinity *)</span>
-  <span class="err">|</span> <span class="n">NearestTiesToAway</span>
+  <span class="o">|</span> <span class="n">NearestTiesToAway</span>
     <span class="c">(** To nearest, tie breaking away from zero *)</span>
 
 <span class="c">(** The first int [prec] is the mantissa&#39;s size, including the implicit bit.</span>
@@ -236,7 +233,7 @@ Those additional triggers are called semantic triggers.</p>
 <p>They correspond to the following constructs.</p>
 <section id="syntax">
 <h4>Syntax<a class="headerlink" href="#syntax" title="Permalink to this heading"></a></h4>
-<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">semantic_trigger</span><span class="o">&gt;</span>    <span class="o">::=</span> <span class="o">&lt;</span><span class="n">in_interval_trigger</span><span class="o">&gt;</span> <span class="err">|</span> <span class="o">&lt;</span><span class="n">maps_to_trigger</span><span class="o">&gt;</span>
+<div class="highlight-alt-ergo notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">semantic_trigger</span><span class="o">&gt;</span>    <span class="o">::=</span> <span class="o">&lt;</span><span class="n">in_interval_trigger</span><span class="o">&gt;</span> <span class="o">|</span> <span class="o">&lt;</span><span class="n">maps_to_trigger</span><span class="o">&gt;</span>
 <span class="c">(* [COMMENT/TODO: seems to always be paired with &#39;interval triggers&#39;/filters *)</span>
 <span class="o">&lt;</span><span class="n">in_interval_trigger</span><span class="o">&gt;</span> <span class="o">::=</span> <span class="o">&lt;</span><span class="n">id</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="ow">in</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">square_bracket</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">bound</span><span class="o">&gt;</span> <span class="k">&#39;</span><span class="o">,</span><span class="k">&#39;</span> <span class="o">&lt;</span><span class="n">bound</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">square_bracket</span><span class="o">&gt;</span>
 <span class="c">(* [COMMENT/TODO: probably there to shorten axioms] *)</span>
