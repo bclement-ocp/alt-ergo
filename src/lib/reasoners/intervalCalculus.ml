@@ -102,8 +102,296 @@ module Sim = OcplibSimplex.Basic.Make(SimVar)(Numbers.Q)(Explanation)
 
 let timer = Timers.M_Arith
 
+module Union_find = struct
+  module type VariableType = sig
+    type t
+
+    val pp : t Fmt.t
+
+    val equal : t -> t -> bool
+
+    val compare : t -> t -> int
+  end
+
+  module type S = sig
+    type 'a t
+
+    val cardinal : 'a t -> int
+
+    type key
+
+    val pp : 'a Fmt.t -> 'a t Fmt.t
+
+    val empty : 'a t
+
+    (** [add ~merge key value uf] adds the key [key] with associated value [value]
+        to the union-find.
+
+        If [key] is already present in the union-find (including if it is no
+        longer canonical), [merge] is used to combine the new value with the
+        existing value associated with [key]. *)
+    val add : merge:('a -> 'a -> 'a) -> key -> 'a -> 'a t -> 'a t
+
+    (** [find_canonical key uf] returns the current canonical representative for
+        [key]. *)
+    val find_canonical : key -> 'a t -> key
+
+    (** [find_opt key uf] returns the value associated with [key], if any.
+
+        [key] does not need to be canonical. *)
+    val find_opt : key -> 'a t -> 'a option
+
+    (** [union ~merge key1 key2 uf] merges the equivalence classes associated with
+        [key1] and [key2], calling [merge] on the corresponding values. *)
+    val union :
+      default:'a -> merge:('a -> 'a -> 'a) -> key -> key -> 'a t -> 'a t
+
+    val find_and_remove_opt : key -> 'a t -> ('a * 'a t) option
+
+    val fold : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
+  end
+
+  module Make (X : VariableType) : S with type key = X.t = struct
+    module MX = Map.Make (X)
+    module SX = Set.Make (X)
+
+    type key = X.t
+
+    type 'a node =
+      { aliases : SX.t
+      ; cardinal : int
+      ; datum : 'a
+      }
+
+    type 'a t =
+      { canonical_elements : X.t MX.t
+      ; node_of_canonicals : 'a node MX.t
+      }
+
+    let cardinal { node_of_canonicals; _ } =
+      MX.cardinal node_of_canonicals
+
+    let print_set ppf set =
+      Fmt.pf ppf "@[<hov 1>{%a}@]"
+        (Fmt.iter ~sep:(fun ppf () -> Fmt.pf ppf ",@") SX.iter X.pp)
+        set
+
+    let print_map pp ppf map =
+      Fmt.pf ppf "@[<hov 1>{%a}@]"
+        (Fmt.iter_bindings
+           ~sep:(fun ppf () -> Fmt.pf ppf ",@ ")
+           MX.iter
+           (fun ppf (k, v) -> Fmt.pf ppf "@[<hov 1>(%a@ %a)@]" X.pp k pp v) )
+        map
+
+    let print_aliases ppf { aliases; _ } = print_set ppf aliases
+
+    let print_datum pp ppf { datum; _ } = pp ppf datum
+
+    let[@ocamlformat "disable"] pp pp ppf { node_of_canonicals; _ } =
+      Fmt.pf ppf
+        "@[<hov 1>(\
+         @[<hov 1>(aliases_of_canonicals@ %a)@]@ \
+         @[<hov 1>(payload_of_canonicals@ %a)@]\
+         )@]"
+        (print_map print_aliases) node_of_canonicals
+        (print_map (print_datum pp)) node_of_canonicals
+
+    let empty = { canonical_elements = MX.empty; node_of_canonicals = MX.empty }
+
+    let find_canonical variable t =
+      match MX.find_opt variable t.canonical_elements with
+      | None -> variable
+      | Some canonical -> canonical
+
+    let add ~merge variable datum t =
+      let variable = find_canonical variable t in
+      let node_of_canonicals =
+        MX.update variable
+          (function
+            | None ->
+              Some { aliases = SX.empty; cardinal = 0; datum = datum }
+            | Some node ->
+              let datum = merge datum node.datum in
+              Some { node with datum } )
+          t.node_of_canonicals
+      in
+      { t with node_of_canonicals }
+
+    let find_node_opt canonical t = MX.find_opt canonical t.node_of_canonicals
+
+    let find_node ~default canonical t =
+      match find_node_opt canonical t with
+      | None -> { aliases = SX.empty; cardinal = 0; datum = default }
+      | Some node -> node
+
+    let find_opt variable t =
+      Option.map (fun node -> node.datum)
+        (find_node_opt (find_canonical variable t) t)
+
+    let set_canonical_element aliases canonical canonical_elements =
+      SX.fold
+        (fun alias canonical_elements -> MX.add alias canonical canonical_elements)
+        aliases canonical_elements
+
+    let union ~default ~merge lhs rhs t =
+      let lhs = find_canonical lhs t in
+      let rhs = find_canonical rhs t in
+      if X.equal lhs rhs then t
+      else
+        let lhs_node = find_node ~default lhs t in
+        let rhs_node = find_node ~default rhs t in
+        let demoted, canonical, canonical_elements =
+          if lhs_node.cardinal < rhs_node.cardinal then
+            ( lhs
+            , rhs
+            , set_canonical_element lhs_node.aliases rhs t.canonical_elements )
+          else
+            ( rhs
+            , lhs
+            , set_canonical_element rhs_node.aliases lhs t.canonical_elements )
+        in
+        let datum = merge lhs_node.datum rhs_node.datum in
+        let node =
+          { aliases = SX.add demoted (SX.union lhs_node.aliases rhs_node.aliases)
+          ; cardinal = lhs_node.cardinal + rhs_node.cardinal + 1
+          ; datum
+          }
+        in
+        let canonical_elements = MX.add demoted canonical canonical_elements in
+        let node_of_canonicals = MX.add canonical node t.node_of_canonicals in
+        let node_of_canonicals = MX.remove demoted node_of_canonicals in
+        { canonical_elements; node_of_canonicals }
+
+    let find_and_remove_opt key t =
+      let canonical = find_canonical key t in
+      match find_node_opt canonical t with
+      | None ->
+        assert (X.equal key canonical);
+        None
+      | Some { aliases; datum; _ } ->
+        let canonical_elements =
+          SX.fold MX.remove aliases t.canonical_elements
+        in
+        let node_of_canonicals = MX.remove canonical t.node_of_canonicals in
+        Some (datum, { canonical_elements ; node_of_canonicals })
+
+    let fold f t init =
+      MX.fold
+        (fun key { datum ; _ } acc -> f key datum acc)
+        t.node_of_canonicals init
+  end
+end
+
+module Inequations = struct
+  module UF = Union_find.Make(struct
+    type t = X.r
+    let pp = X.print
+    let equal = X.equal
+    let compare = X.hash_cmp
+  end)
+
+  type t =
+    { inequalities : P.t Inequalities.t MPL.t
+    ; pending_inequalities : P.t Inequalities.t option MPL.t
+    ; graph : Expr.Set.t UF.t }
+
+  let empty =
+    { inequalities = MPL.empty
+    ; pending_inequalities = MPL.empty
+    ; graph = UF.empty }
+
+  let add a v t =
+    let pending_inequalities = MPL.add a (Some v) t.pending_inequalities in
+    { t with pending_inequalities }
+
+  let remove a t =
+    let pending_inequalities = MPL.add a None t.pending_inequalities in
+    { t with pending_inequalities }
+
+  let saturate_and_split t =
+    let inequalities, graph, to_process =
+      MPL.fold (fun a v (inequalities, graph, to_process) ->
+        let graph, to_process =
+          match MPL.find_opt a inequalities with
+          | None -> graph, to_process
+          | Some old_ineq ->
+            match P.choose old_ineq.ple0 with
+            | exception Not_found ->
+              Errors.internal_error "couic dead"
+            | (_, lv) ->
+              match UF.find_and_remove_opt lv graph with
+              | None -> graph, to_process
+              | Some (to_process_lv, graph) ->
+                graph, Expr.Set.union to_process_lv to_process
+        in
+        match v with
+        | None ->
+          let inequalities = MPL.remove a inequalities in
+          let to_process = Expr.Set.remove a to_process in
+          inequalities, graph, to_process
+        | Some new_ineq ->
+          let inequalities = MPL.add a new_ineq inequalities in
+          let to_process = Expr.Set.add a to_process in
+          inequalities, graph, to_process
+      ) t.pending_inequalities (t.inequalities, t.graph, Expr.Set.empty)
+    in
+    let graph, classes =
+      SE.fold (fun a (graph, classes) ->
+        let ineq =
+          try MPL.find a inequalities
+          with Not_found -> assert false
+        in
+        let first_lv, graph =
+          P.fold (fun lv _ (first_lv, graph) ->
+            match first_lv with
+            | None ->
+              let graph =
+                UF.add ~merge:Expr.Set.union lv
+                  (Expr.Set.singleton a) graph
+              in
+              (Some lv, graph)
+            | Some (first_lv) ->
+              let graph =
+                UF.union lv first_lv graph
+                  ~default:Expr.Set.empty ~merge:Expr.Set.union
+              in
+              Some first_lv, graph)
+            ineq.ple0 (None, graph)
+        in
+        let classes =
+          match first_lv with
+          | None -> assert false
+          | Some lv -> SX.add lv classes
+        in
+        graph, classes) to_process (graph, SX.empty)
+    in
+    let classes =
+      SX.map (fun key -> UF.find_canonical key graph) classes
+    in
+    let ineqs =
+      SX.fold (fun key acc ->
+        match UF.find_opt key graph with
+        | None -> assert false
+        | Some lits ->
+          let ineqs =
+            SE.fold
+              (fun lit ineqs ->
+                let ineq = MPL.find lit inequalities in
+                ineq :: ineqs)
+                lits []
+          in
+          ineqs :: acc
+      ) classes []
+    in
+    ineqs,
+    { inequalities
+    ; graph
+    ; pending_inequalities = MPL.empty }
+end
+
 type t = {
-  inequations : P.t Inequalities.t MPL.t;
+  inequations : Inequations.t;
   monomes: (I.t * SX.t) MX0.t;
   polynomes : I.t MP0.t;
   delayed : Rel_utils.Delayed.t;
@@ -529,7 +817,7 @@ module Debug = struct
         (fun a { ple0 = p; is_le = is_le; _ } ->
            print_dbg ~flushed:false ~header:false "%a%s0  |  %a@ "
              P.print p (if is_le then "<=" else "<") E.print a
-        )env.inequations;
+        )env.inequations.Inequations.inequalities;
       print_dbg ~flushed:false ~header:false
         "------------ FM: monomes ----------------------------@ ";
       MX.iter
@@ -724,7 +1012,7 @@ let dispatch = function
   | _ -> None
 
 let empty uf = {
-  inequations = MPL.empty;
+  inequations = Inequations.empty;
   monomes = MX.empty ;
   polynomes = MP.empty ;
   delayed = Rel_utils.Delayed.create ~is_ready:X.is_constant dispatch;
@@ -1208,46 +1496,6 @@ let add_inequations are_eq acc x_opt lin =
            env, eqs, register_relationship c x ple0 ineq.expl rels
     ) acc lin
 
-let split_problem current_age env ineqs aliens =
-  let l, all_lvs =
-    List.fold_left
-      (fun (acc, all_lvs) ({ ple0 = p; _ } as ineq) ->
-
-
-         match ineq_status ineq with
-         | Trivial_eq | Trivial_ineq _ -> (acc, all_lvs)
-         | Bottom ->
-           raise (Ex.Inconsistent (ineq.expl, env.classes))
-         | _ ->
-           let lvs =
-             List.fold_left (fun acc e -> SX.add e acc) SX.empty (aliens p)
-           in
-           ([ineq], lvs) :: acc , SX.union lvs all_lvs
-      )([], SX.empty) ineqs
-  in
-  let ll =
-    SX.fold
-      (fun x l ->
-         let lx, l_nx = List.partition (fun (_,s) -> SX.mem x s) l in
-         match lx with
-         | [] -> assert false
-         | e:: lx ->
-           let elx =
-             List.fold_left
-               (fun (l, lvs) (l', lvs') ->
-                  List.rev_append l l', SX.union lvs lvs') e lx in
-           elx :: l_nx
-      ) all_lvs l
-  in
-  let ll =
-    List.filter
-      (fun (ineqs, _) ->
-         List.exists
-           (fun ineq -> Z.equal current_age ineq.age) ineqs
-      )ll
-  in
-  List.fast_sort (fun (a,_) (b,_) -> List.length a - List.length b) ll
-
 let is_normalized_poly uf p =
   let p = alien_of p in
   let rp, _  = Uf.find_r uf p in
@@ -1391,16 +1639,19 @@ let fm (module Oracle : S with type p = P.t) uf are_eq rclass_of env eqs =
       ~function_name:"fm"
       "in fm/fm-simplex";
   Options.tool_req 4 "TR-Arith-Fm";
-  let ineqs =
-    MPL.fold (fun _ v acc ->
-        Options.heavy_assert (fun () -> is_normalized_poly uf v.ple0);
-        (better_bound_from_intervals env v) :: acc
-      ) env.inequations []
+  let pbs, env =
+    let pbs, inequations = Inequations.saturate_and_split env.inequations in
+    pbs, { env with inequations }
   in
-  let current_age = Oracle.current_age () in
-  let pbs = split_problem current_age env ineqs args_of in
+  let pbs =
+    List.map (fun ineqs ->
+      List.map (fun ineq ->
+        Options.heavy_assert (fun () -> is_normalized_poly uf ineq.ple0);
+        better_bound_from_intervals env ineq) ineqs
+    ) pbs
+  in
   let res = List.fold_left
-      (fun (env, eqs) (ineqs, _) ->
+      (fun (env, eqs) ineqs ->
          let env = update_linear_dep env rclass_of ineqs in
          let mp = Oracle.MINEQS.add_to_map Oracle.MINEQS.empty ineqs in
          let env, eqs, (x_rels, p_rels) =
@@ -1560,10 +1811,10 @@ let count_splits env la =
   {env with size_splits = nb}
 
 let remove_ineq a ineqs =
-  match a with None -> ineqs | Some a -> MPL.remove a ineqs
+  match a with None -> ineqs | Some a -> Inequations.remove a ineqs
 
 let add_ineq a v ineqs =
-  match a with None -> ineqs | Some a -> MPL.add a v ineqs
+  match a with None -> ineqs | Some a -> Inequations.add a v ineqs
 
 
 (*** functions to improve intervals modulo equality ***)

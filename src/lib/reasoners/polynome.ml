@@ -62,6 +62,8 @@ module type T = sig
   val to_list : t -> (Q.t * r) list * Q.t
   val leaves : t -> r list
 
+  val fold : (r -> Numbers.Q.t -> 'a -> 'a) -> t -> 'a -> 'a
+
   val print : Format.formatter -> t -> unit
   val type_info : t -> Ty.t
   val is_monomial : t -> (Q.t * r * Q.t) option
@@ -289,6 +291,8 @@ module Make (X : S) = struct
     with Not_found -> p2
 
   let remove x p = { p with m = M.remove x p.m }
+
+  let fold f p init = M.fold f p.m init
 
   let to_list p = map_to_list p.m , p.c
 

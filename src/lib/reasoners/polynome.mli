@@ -60,6 +60,8 @@ module type T = sig
   val to_list : t -> (Numbers.Q.t * r) list * Numbers.Q.t
   val leaves : t -> r list
 
+  val fold : (r -> Numbers.Q.t -> 'a -> 'a) -> t -> 'a -> 'a
+
   val print : Format.formatter -> t -> unit
   val type_info : t -> Ty.t
   val is_monomial : t -> (Numbers.Q.t * r * Numbers.Q.t) option
