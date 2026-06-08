@@ -1910,14 +1910,25 @@ module Triggers = struct
       let compare (t1,_,_) (t2,_,_) = compare t1 t2
     end)
 
-  let is_prefix v = match v with
+  let is_arith_prefix v =
+    (* See comment in [is_arith_infix]. *)
+    match v with
     | Sy.Op Sy.Minus -> true
     | _ -> false
 
-  let is_infix v =
+  let is_arith_infix v =
+    (* Built-in arithmetic operators are not considered suitable for building
+       triggers due to the fragility of matching with these operators.
+
+       As a special case of the special case, [Div] and [Modulo] operators are
+       not considered as arithmetic operators for this purpose: they have no
+       advanced built-in handling to compensate for being absent in triggers,
+       being non-commutative makes matching against them more robust, and most
+       importantly they are often used in conjunction with triggers to model
+       non-linear behaviour. *)
     let open Sy in
     match v with
-    | Op (Plus | Minus | Mult | Div | Modulo) -> true
+    | Op (Plus | Minus | Mult) -> true
     | _ -> false
 
   let rec score_term (t : expr) =
@@ -1925,7 +1936,7 @@ module Triggers = struct
     match t with
     | { f = (True | False | Int _ | Real _ | Bitv _ | Var _); _ } -> 0
 
-    | { f; _ } when is_infix f || is_prefix f ->
+    | { f; _ } when is_arith_infix f || is_arith_prefix f ->
       0 (* arithmetic triggers are not suitable *)
 
     | { f = Op (Get | Set) ; xs = [t1 ; t2]; _ } ->
@@ -1961,24 +1972,24 @@ module Triggers = struct
     | { f = Var _; _ }, _ -> -1
     | _, { f = Var _; _ } ->  1
     | { f = s; xs = l1; _ }, { f = s'; xs = l2; _ }
-      when is_infix s && is_infix s' ->
+      when is_arith_infix s && is_arith_infix s' ->
       let c = (score_term t1) - (score_term t2) in
       if c <> 0 then c
       else
         let c = Sy.compare s s' in
         if c <> 0 then c else Util.cmp_lists l1 l2 cmp_trig_term
 
-    | { f = s; _ }, _ when is_infix s -> -1
-    | _ , { f = s'; _ } when is_infix s' -> 1
+    | { f = s; _ }, _ when is_arith_infix s -> -1
+    | _ , { f = s'; _ } when is_arith_infix s' -> 1
 
     | { f = s1; xs =[t1]; _ }, { f = s2; xs = [t2]; _ }
-      when is_prefix s1 && is_prefix s2 ->
+      when is_arith_prefix s1 && is_arith_prefix s2 ->
       let c = Sy.compare s1 s2 in
       if c<>0 then c else cmp_trig_term t1 t2
 
-    | { f = s1; _ }, _ when is_prefix s1 -> -1
+    | { f = s1; _ }, _ when is_arith_prefix s1 -> -1
 
-    | _, { f = s2; _ } when is_prefix s2 ->  1
+    | _, { f = s2; _ } when is_arith_prefix s2 ->  1
 
     | { f = (Name _) as s1; xs=tl1; _ }, { f = (Name _) as s2; xs=tl2; _ } ->
       let l1 = List.map score_term tl1 in
@@ -2351,7 +2362,7 @@ module Triggers = struct
     let rec aux ((vterm, vtype) as vars) (strs, lets) e =
       let strs =
         if e.pure && (has_bvar e.vars vterm || has_tyvar e.vty vtype) &&
-           not (is_prefix e.f)
+           not (is_arith_prefix e.f)
         then
           let vrs = free_vars_as_set e in
           STRS.add (e, vrs, e.vty) strs
@@ -2398,7 +2409,7 @@ module Triggers = struct
         List.fold_left max_terms acc e.xs
 
       | { f = Sy.Form (Sy.F_Lemma | Sy.F_Skolem) | Sy.Let; _ } -> raise Exit
-      | { f; _ } when is_infix f -> raise Exit
+      | { f; _ } when is_arith_infix f -> raise Exit
       (*| {f = Op _} -> raise Exit*)
       | { f = Op _; _ } ->
         if eq exclude e then acc else e :: acc
