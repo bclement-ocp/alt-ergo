@@ -248,7 +248,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       mutable tenv : Th.t;
       mutable unit_tenv : Th.t;
       tenv_queue : Th.t Vec.t;
-      tatoms_queue : Atom.atom Queue.t;
+      tatoms_queue : Atom.atom Vec.t;
           (** Queue of atoms that have been added to the [trail] through either
               decision or boolean propagation, but have not been otherwise
               processed yet (in particular, they have not been propagated to the
@@ -261,7 +261,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
               [tatoms_queue] is only used for relevancy propagation (see
               [relevancy_propagation]); instead, the [th_tableaux] field is used
               to dictate theory propagations. *)
-      th_tableaux : Atom.atom Queue.t;
+      th_tableaux : Atom.atom Vec.t;
           (** Queue of atoms to propagate to the theory when using CDCL-Tableaux
               with the [get_cdcl_tableaux_th ()] option.
 
@@ -441,8 +441,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       tenv = Th.empty ();
       unit_tenv = Th.empty ();
       tenv_queue = Vec.make 100 ~dummy:(Th.empty ());
-      tatoms_queue = Queue.create ();
-      th_tableaux = Queue.create ();
+      tatoms_queue = Vec.make 100 ~dummy:Atom.dummy_atom;
+      th_tableaux = Vec.make 100 ~dummy:Atom.dummy_atom;
       cpt_current_propagations = 0;
       proxies = FF.empty_proxies;
       lazy_cnf = Matoms.empty;
@@ -615,8 +615,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           if not (is_semantic a) then insert_var_order env a.var
         end
       done;
-      Queue.clear env.tatoms_queue;
-      Queue.clear env.th_tableaux;
+      Vec.clear env.tatoms_queue;
+      Vec.clear env.th_tableaux;
       env.tenv <- Vec.get env.tenv_queue lvl;
       (* recover the right tenv *)
       env.nchoices <- Vec.get env.nchoices_stack lvl;
@@ -885,7 +885,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         env.relevants <- SFF.add f_a env.relevants;
         match view f_a with
         | UNIT a ->
-          Queue.push a env.th_tableaux;
+          Vec.push env.th_tableaux a;
           ma
         | AND l -> List.fold_left (add_aux env) ma l
         | OR l -> (
@@ -916,7 +916,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     match Shostak.Literal.view @@ Atom.literal a with
     | LSem _ ->
       (* Always propagate back semantic literals to the theory. *)
-      Queue.push a env.th_tableaux;
+      Vec.push env.th_tableaux a;
       ma
     | LTerm _ -> (
       try
@@ -958,7 +958,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let compute_facts_for_theory_propagate env =
     (*let a = SFF.cardinal env.relevants in*)
     env.lazy_cnf
-      <- Queue.fold (relevancy_propagation env) env.lazy_cnf env.tatoms_queue;
+      <- Vec.fold (relevancy_propagation env) env.lazy_cnf env.tatoms_queue;
     Options.heavy_assert (fun () ->
         Matoms.for_all (fun a _ -> not a.is_true) env.lazy_cnf)
 
@@ -978,7 +978,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let unit_theory_propagate env _full_q lazy_q =
     let nb_f = ref 0 in
     let facts =
-      Queue.fold
+      Vec.fold
         (fun acc (ta : Atom.atom) ->
           assert ta.is_true;
           assert (ta.var.level >= 0);
@@ -1028,8 +1028,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     | C_bool _ -> assert false
     | C_none -> (
       let nb_f = ref 0 in
-      while not (Queue.is_empty tatoms_queue) do
-        let a = Queue.pop tatoms_queue in
+      let num_tatoms = Vec.size tatoms_queue in
+      while !nb_f < num_tatoms do
+        let a = Vec.get tatoms_queue !nb_f in
         incr nb_f;
         let ta =
           if a.is_true
@@ -1067,8 +1068,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       done;
       if Options.get_debug_sat ()
       then Printer.print_dbg "[satml] Theory_propagate of %d atoms@." !nb_f;
-      Queue.clear env.tatoms_queue;
-      Queue.clear env.th_tableaux;
+      Vec.clear env.tatoms_queue;
+      Vec.clear env.th_tableaux;
       if !facts == []
       then C_none
       else
@@ -1102,7 +1103,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       env.qhead <- env.qhead + 1;
       incr num_props;
       propagate_atom env a res;
-      Queue.push a env.tatoms_queue
+      Vec.push env.tatoms_queue a
     done;
     env.propagations <- env.propagations + !num_props;
     env.simpDB_props <- env.simpDB_props - !num_props;
