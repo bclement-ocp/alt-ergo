@@ -118,6 +118,9 @@ val iteri : (int -> 'a -> unit) -> 'a t -> unit
 val fold : ('b -> 'a -> 'b) -> 'b -> 'a t -> 'b
 (** Fold over elements. *)
 
+val fold_range : ('b -> 'a -> 'b) -> pos:int -> len:int -> 'b -> 'a t -> 'b
+(** Fold over elements in the given range. *)
+
 val exists : ('a -> bool) -> 'a t -> bool
 (** Does there exist an element that satisfies the predicate? *)
 

@@ -144,6 +144,16 @@ let fold f acc vec =
   iter (fun elt -> acc := f !acc elt) vec;
   !acc
 
+let[@inline] fold_range f ~pos ~len acc vec =
+  assert (len >= 0);
+  let last = pos + len - 1 in
+  assert (0 <= pos && last < size vec);
+  let acc = ref acc in
+  for i = pos to last do
+    acc := f !acc (Array.unsafe_get vec.data i)
+  done;
+  !acc
+
 let to_array a = Array.sub a.data 0 a.sz
 
 let to_list vec = Array.to_seq (to_array vec) |> List.of_seq

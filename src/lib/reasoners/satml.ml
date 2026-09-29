@@ -211,6 +211,18 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       (* Tete de la File des faits unitaires a propager. C'est un index vers le
          trail *)
       mutable qhead : int;
+      (* Atoms in the [trail] in the range from [thead] to [qhead] have been
+         added to the trail through either decision or boolean propagation, but
+         have not been propagated to the theory yet.
+
+         In pure CDCL, all the atoms in that range are later propagated to the
+         theory in [theory_propagate].
+
+         In CDCL-Tableaux with the [get_cdcl_tableaux_th ()] option, the atoms
+         in this range are used for relevancy propagation (see
+         [relevancy_propagation]), which fills out the [th_tableaux] queue that
+         is used to dictate theory propagations. *)
+      mutable thead : int;
       (* Nombre des assignements top-level depuis la derniere execution de
          'simplify()' *)
       mutable simpDB_assigns : int;
@@ -248,19 +260,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       mutable tenv : Th.t;
       mutable unit_tenv : Th.t;
       tenv_queue : Th.t Vec.t;
-      tatoms_queue : Atom.atom Vec.t;
-          (** Queue of atoms that have been added to the [trail] through either
-              decision or boolean propagation, but have not been otherwise
-              processed yet (in particular, they have not been propagated to the
-              theory).
-
-              In pure CDCL mode, all the atoms in [tatoms_queue] are propagated
-              in the theory.
-
-              In CDCL-Tableaux with the [get_cdcl_tableaux_th ()] option, the
-              [tatoms_queue] is only used for relevancy propagation (see
-              [relevancy_propagation]); instead, the [th_tableaux] field is used
-              to dictate theory propagations. *)
       th_tableaux : Atom.atom Vec.t;
           (** Queue of atoms to propagate to the theory when using CDCL-Tableaux
               with the [get_cdcl_tableaux_th ()] option.
@@ -418,6 +417,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       nchoices = 0;
       nchoices_stack = Vec.make 100 ~dummy:(-105);
       qhead = 0;
+      thead = 0;
       simpDB_assigns = -1;
       simpDB_props = 0;
       order = Vheap.create 0 Atom.dummy_var;
@@ -441,7 +441,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       tenv = Th.empty ();
       unit_tenv = Th.empty ();
       tenv_queue = Vec.make 100 ~dummy:(Th.empty ());
-      tatoms_queue = Vec.make 100 ~dummy:Atom.dummy_atom;
       th_tableaux = Vec.make 100 ~dummy:Atom.dummy_atom;
       cpt_current_propagations = 0;
       proxies = FF.empty_proxies;
@@ -602,6 +601,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     if decision_level env > lvl
     then begin
       env.qhead <- Vec.get env.trail_lim lvl;
+      env.thead <- env.qhead;
       for c = Vec.size env.trail - 1 downto env.qhead do
         let a = Vec.get env.trail c in
         if Options.get_minimal_bj () && a.var.level <= lvl
@@ -615,7 +615,6 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
           if not (is_semantic a) then insert_var_order env a.var
         end
       done;
-      Vec.clear env.tatoms_queue;
       Vec.clear env.th_tableaux;
       env.tenv <- Vec.get env.tenv_queue lvl;
       (* recover the right tenv *)
@@ -958,7 +957,9 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
   let compute_facts_for_theory_propagate env =
     (*let a = SFF.cardinal env.relevants in*)
     env.lazy_cnf
-      <- Vec.fold (relevancy_propagation env) env.lazy_cnf env.tatoms_queue;
+      <- Vec.fold_range
+           (relevancy_propagation env)
+           env.lazy_cnf env.trail ~pos:env.thead ~len:(env.qhead - env.thead);
     Options.heavy_assert (fun () ->
         Matoms.for_all (fun a _ -> not a.is_true) env.lazy_cnf)
 
@@ -975,10 +976,10 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
        "expensive_theory_propagate => Inconsistent@."; *)
   (*   Some dep *)
 
-  let unit_theory_propagate env _full_q lazy_q =
+  let unit_theory_propagate env lazy_q ~len ~pos =
     let nb_f = ref 0 in
     let facts =
-      Vec.fold
+      Vec.fold_range ~len ~pos
         (fun acc (ta : Atom.atom) ->
           assert ta.is_true;
           assert (ta.var.level >= 0);
@@ -1016,21 +1017,20 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
     let facts = ref [] in
     let dlvl = decision_level env in
     if Options.get_cdcl_tableaux () then compute_facts_for_theory_propagate env;
-    let tatoms_queue =
+    let pos, len, tatoms_queue =
       if Options.get_cdcl_tableaux_th ()
       then begin
-        env.th_tableaux
+        0, Vec.size env.th_tableaux, env.th_tableaux
       end
-      else env.tatoms_queue
+      else env.thead, env.qhead - env.thead, env.trail
     in
-    match unit_theory_propagate env env.tatoms_queue tatoms_queue with
+    match unit_theory_propagate env tatoms_queue ~len ~pos with
     | C_theory _ as res -> res
     | C_bool _ -> assert false
     | C_none -> (
       let nb_f = ref 0 in
-      let num_tatoms = Vec.size tatoms_queue in
-      while !nb_f < num_tatoms do
-        let a = Vec.get tatoms_queue !nb_f in
+      while !nb_f < len do
+        let a = Vec.get tatoms_queue (pos + !nb_f) in
         incr nb_f;
         let ta =
           if a.is_true
@@ -1068,7 +1068,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       done;
       if Options.get_debug_sat ()
       then Printer.print_dbg "[satml] Theory_propagate of %d atoms@." !nb_f;
-      Vec.clear env.tatoms_queue;
+      env.thead <- env.qhead;
       Vec.clear env.th_tableaux;
       if !facts == []
       then C_none
@@ -1102,8 +1102,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       then Printer.print_dbg "[satml] propagate atom %a@." Atom.pr_atom a;
       env.qhead <- env.qhead + 1;
       incr num_props;
-      propagate_atom env a res;
-      Vec.push env.tatoms_queue a
+      propagate_atom env a res
     done;
     env.propagations <- env.propagations + !num_props;
     env.simpDB_props <- env.simpDB_props - !num_props;
@@ -1969,6 +1968,7 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
       let old_decisions = env.next_decisions in
       let old_split = env.next_split in
       let old_optimized_split = env.next_optimized_split in
+      let old_thead = env.thead in
       let fictive_lazy =
         SFF.fold (fun ff acc -> add_form_to_lazy_cnf env acc ff) sf old_lazy
       in
@@ -1984,7 +1984,8 @@ module Make (Th : Theory.S) : SAT_ML with type th = Th.t = struct
         env.tenv <- old_tenv;
         env.next_decisions <- old_decisions;
         env.next_split <- old_split;
-        env.next_optimized_split <- old_optimized_split
+        env.next_optimized_split <- old_optimized_split;
+        env.thead <- old_thead
       end
     in
     fun env sff -> if Options.get_cdcl_tableaux () then better_bj env sff
